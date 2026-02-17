@@ -183,6 +183,66 @@ function MSWA_ApplyTextStyleToButton(btn, key)
 end
 
 -----------------------------------------------------------
+-- Stack text style helpers
+-----------------------------------------------------------
+
+function MSWA_GetStackStyleForKey(key)
+    local db = MSWA_GetDB()
+    local s = nil
+    if key ~= nil then s = select(1, MSWA_GetSpellSettings(db, key)) end
+
+    local size = (s and s.stackFontSize) or 12
+    size = tonumber(size) or 12
+    if size < 6 then size = 6 end
+    if size > 48 then size = 48 end
+
+    local tc = (s and s.stackColor) or { r = 1, g = 1, b = 1 }
+    local r  = tonumber(tc.r) or 1
+    local g  = tonumber(tc.g) or 1
+    local b  = tonumber(tc.b) or 1
+
+    local point = (s and s.stackPoint) or "BOTTOMRIGHT"
+    point = tostring(point or "BOTTOMRIGHT")
+
+    local ox = (s and s.stackOffsetX) or 0
+    local oy = (s and s.stackOffsetY) or 0
+    ox = tonumber(ox) or 0
+    oy = tonumber(oy) or 0
+
+    return size, r, g, b, point, ox, oy
+end
+
+function MSWA_ApplyStackStyleToButton(btn, key)
+    if not btn or not btn.stackText then return end
+
+    local db = MSWA_GetDB()
+    local s = (key ~= nil) and select(1, MSWA_GetSpellSettings(db, key)) or nil
+    local fontKey = (s and s.stackFontKey) or "DEFAULT"
+    local path = MSWA_GetFontPathFromKey(fontKey)
+    local size, r, g, b, point, ox, oy = MSWA_GetStackStyleForKey(key)
+
+    if path and btn.stackText.SetFont then
+        btn.stackText:SetFont(path, size, "OUTLINE")
+    end
+    if btn.stackText.SetTextColor then
+        btn.stackText:SetTextColor(r, g, b, 1)
+    end
+    if btn.stackText.ClearAllPoints and btn.stackText.SetPoint then
+        btn.stackText:ClearAllPoints()
+        local baseOff = MSWA_TEXT_POINT_OFFSETS[point] or MSWA_TEXT_POINT_OFFSETS.BOTTOMRIGHT
+        btn.stackText:SetPoint(point or "BOTTOMRIGHT", btn, point or "BOTTOMRIGHT", (baseOff[1] or -1) + ox, (baseOff[2] or 1) + oy)
+    end
+end
+
+function MSWA_GetStackShowMode(key)
+    if not key then return "auto" end
+    local db = MSWA_GetDB()
+    local s = select(1, MSWA_GetSpellSettings(db, key))
+    if s and s.stackShowMode then return s.stackShowMode end
+    return "auto"
+end
+
+-----------------------------------------------------------
 -- Main frame + drag logic
 -----------------------------------------------------------
 
@@ -470,6 +530,11 @@ local function MSWA_CreateIcon(i)
     btn.count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
     btn.count:SetText("")
     btn.count:Hide()
+
+    btn.stackText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.stackText:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+    btn.stackText:SetText("")
+    btn.stackText:Hide()
 
     btn.spellID = nil
 

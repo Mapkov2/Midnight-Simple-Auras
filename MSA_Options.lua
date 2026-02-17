@@ -392,6 +392,35 @@ MSWA_UpdateDetailPanel = function()
         if f.tc2ValueLabel then f.tc2ValueLabel:SetAlpha(enSub and 1 or 0.4) end
     end
 
+    -- Sync Stack controls
+    if f.stackShowMode then
+        local mode = (s and s.stackShowMode) or "auto"
+        local stackShowLabels = { auto = "Auto", show = "Force Show", hide = "Force Hide" }
+        f.stackShowMode:SetText(stackShowLabels[mode] or "Auto")
+    end
+    if f.stackSizeEdit then
+        local sz = (s and s.stackFontSize) or 12
+        sz = tonumber(sz) or 12; if sz < 6 then sz = 6 end; if sz > 48 then sz = 48 end
+        f.stackSizeEdit:SetText(tostring(sz))
+    end
+    if f.stackPosDrop and UIDropDownMenu_SetText then
+        local point = (s and s.stackPoint) or "BOTTOMRIGHT"
+        UIDropDownMenu_SetText(f.stackPosDrop, MSWA_GetTextPosLabel(point))
+    end
+    if f.stackColorSwatch then
+        local tc = (s and s.stackColor) or { r = 1, g = 1, b = 1 }
+        f.stackColorSwatch:SetColorTexture(tonumber(tc.r) or 1, tonumber(tc.g) or 1, tonumber(tc.b) or 1, 1)
+    end
+    if f.stackOffXEdit then
+        f.stackOffXEdit:SetText(tostring((s and s.stackOffsetX) or 0))
+    end
+    if f.stackOffYEdit then
+        f.stackOffYEdit:SetText(tostring((s and s.stackOffsetY) or 0))
+    end
+    if f.stackFontDrop then
+        if f._initStackFontDrop then f._initStackFontDrop() end
+    end
+
     -- Sync Auto Buff controls
     if f.autoBuffCheck then
         local isAutoBuff = (s and s.auraMode == "AUTOBUFF") and true or false
@@ -1683,9 +1712,80 @@ local function MSWA_CreateOptionsFrame()
         MSWA_RequestUpdateSpells()
     end)
 
+    -- ======= Stack Text Section =======
+    local stackSep = f.displayPanel:CreateTexture(nil, "ARTWORK")
+    stackSep:SetPoint("TOPLEFT", f.swipeDarkenCheck, "BOTTOMLEFT", 4, -10)
+    stackSep:SetSize(400, 1); stackSep:SetColorTexture(1, 1, 1, 0.12)
+
+    f.stackShowLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackShowLabel:SetPoint("TOPLEFT", stackSep, "BOTTOMLEFT", 0, -8)
+    f.stackShowLabel:SetText("|cffffcc00Stacks|r")
+
+    f.stackShowMode = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate")
+    f.stackShowMode:SetSize(100, 20); f.stackShowMode:SetPoint("LEFT", f.stackShowLabel, "RIGHT", 10, 0)
+    f.stackShowMode:SetText("Auto")
+
+    local stackShowModes = { "auto", "show", "hide" }
+    local stackShowLabels = { auto = "Auto", show = "Force Show", hide = "Force Hide" }
+    f.stackShowMode:SetScript("OnClick", function()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local cur = s2.stackShowMode or "auto"
+        local idx = 1
+        for i, m in ipairs(stackShowModes) do if m == cur then idx = i; break end end
+        idx = idx % #stackShowModes + 1
+        s2.stackShowMode = stackShowModes[idx]
+        f.stackShowMode:SetText(stackShowLabels[s2.stackShowMode] or "Auto")
+        MSWA_RequestUpdateSpells()
+    end)
+
+    -- Stack Font
+    f.stackFontLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackFontLabel:SetPoint("TOPLEFT", f.stackShowLabel, "BOTTOMLEFT", 0, -12)
+    f.stackFontLabel:SetText("Font:")
+    f.stackFontDrop = CreateFrame("Frame", "MSWA_StackFontDropDown", f.displayPanel, "UIDropDownMenuTemplate")
+    f.stackFontDrop:SetPoint("LEFT", f.stackFontLabel, "RIGHT", -10, -3)
+
+    -- Stack Size
+    f.stackSizeLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackSizeLabel:SetPoint("TOPLEFT", f.stackFontLabel, "BOTTOMLEFT", 0, -16)
+    f.stackSizeLabel:SetText("Size:")
+    f.stackSizeEdit = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate")
+    f.stackSizeEdit:SetSize(50, 20); f.stackSizeEdit:SetPoint("LEFT", f.stackSizeLabel, "RIGHT", 6, 0); f.stackSizeEdit:SetAutoFocus(false); f.stackSizeEdit:SetNumeric(true)
+    f.stackSizeMinus = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate"); f.stackSizeMinus:SetSize(20, 20); f.stackSizeMinus:SetPoint("LEFT", f.stackSizeEdit, "RIGHT", 2, 0); f.stackSizeMinus:SetText("-")
+    f.stackSizePlus = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate"); f.stackSizePlus:SetSize(20, 20); f.stackSizePlus:SetPoint("LEFT", f.stackSizeMinus, "RIGHT", 2, 0); f.stackSizePlus:SetText("+")
+
+    -- Stack Pos
+    f.stackPosLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackPosLabel:SetPoint("LEFT", f.stackSizePlus, "RIGHT", 14, 0)
+    f.stackPosLabel:SetText("Pos:")
+    f.stackPosDrop = CreateFrame("Frame", "MSWA_StackPosDropDown", f.displayPanel, "UIDropDownMenuTemplate")
+    f.stackPosDrop:SetPoint("LEFT", f.stackPosLabel, "RIGHT", -10, -3)
+
+    -- Stack Color
+    f.stackColorLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackColorLabel:SetPoint("TOPLEFT", f.stackSizeLabel, "BOTTOMLEFT", 0, -12)
+    f.stackColorLabel:SetText("Color:")
+    f.stackColorBtn = CreateFrame("Button", nil, f.displayPanel); f.stackColorBtn:SetSize(18, 18); f.stackColorBtn:SetPoint("LEFT", f.stackColorLabel, "RIGHT", 8, 0); f.stackColorBtn:EnableMouse(true)
+    f.stackColorSwatch = f.stackColorBtn:CreateTexture(nil, "ARTWORK"); f.stackColorSwatch:SetAllPoints(true); f.stackColorSwatch:SetColorTexture(1, 1, 1, 1)
+    local stackColorBorder = f.stackColorBtn:CreateTexture(nil, "BORDER"); stackColorBorder:SetPoint("TOPLEFT", f.stackColorBtn, "TOPLEFT", -1, 1); stackColorBorder:SetPoint("BOTTOMRIGHT", f.stackColorBtn, "BOTTOMRIGHT", 1, -1); stackColorBorder:SetColorTexture(0, 0, 0, 1)
+
+    -- Stack Offset X/Y
+    f.stackOffXLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackOffXLabel:SetPoint("LEFT", f.stackColorBtn, "RIGHT", 16, 0)
+    f.stackOffXLabel:SetText("Offset X:")
+    f.stackOffXEdit = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate")
+    f.stackOffXEdit:SetSize(40, 20); f.stackOffXEdit:SetPoint("LEFT", f.stackOffXLabel, "RIGHT", 4, 0); f.stackOffXEdit:SetAutoFocus(false)
+
+    f.stackOffYLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackOffYLabel:SetPoint("LEFT", f.stackOffXEdit, "RIGHT", 10, 0)
+    f.stackOffYLabel:SetText("Y:")
+    f.stackOffYEdit = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate")
+    f.stackOffYEdit:SetSize(40, 20); f.stackOffYEdit:SetPoint("LEFT", f.stackOffYLabel, "RIGHT", 4, 0); f.stackOffYEdit:SetAutoFocus(false)
+
     -- ======= Conditional 2nd Text Color =======
     local tc2Sep = f.displayPanel:CreateTexture(nil, "ARTWORK")
-    tc2Sep:SetPoint("TOPLEFT", f.swipeDarkenCheck, "BOTTOMLEFT", 4, -10)
+    tc2Sep:SetPoint("TOPLEFT", f.stackColorLabel, "BOTTOMLEFT", 0, -10)
     tc2Sep:SetSize(400, 1); tc2Sep:SetColorTexture(1, 1, 1, 0.12)
 
     f.tc2Check = CreateFrame("CheckButton", nil, f.displayPanel, "ChatConfigCheckButtonTemplate")
@@ -1703,7 +1803,7 @@ local function MSWA_CreateOptionsFrame()
     f.tc2ColorSwatch = f.tc2ColorBtn:CreateTexture(nil, "ARTWORK"); f.tc2ColorSwatch:SetAllPoints(true); f.tc2ColorSwatch:SetColorTexture(1, 0, 0, 1)
     local tc2Border = f.tc2ColorBtn:CreateTexture(nil, "BORDER"); tc2Border:SetPoint("TOPLEFT", f.tc2ColorBtn, "TOPLEFT", -1, 1); tc2Border:SetPoint("BOTTOMRIGHT", f.tc2ColorBtn, "BOTTOMRIGHT", 1, -1); tc2Border:SetColorTexture(0, 0, 0, 1)
 
-    -- Condition button (cycles: TIMER_BELOW → TIMER_ABOVE)
+    -- Condition button (cycles: TIMER_BELOW â†’ TIMER_ABOVE)
     f.tc2CondLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.tc2CondLabel:SetPoint("LEFT", f.tc2ColorBtn, "RIGHT", 16, 0)
     f.tc2CondLabel:SetText("When:")
@@ -1784,6 +1884,124 @@ local function MSWA_CreateOptionsFrame()
             ColorPickerFrame:SetColorRGB(r, g, b); ColorPickerFrame:Show()
         end
     end)
+
+    -- ======= Stack control scripts =======
+    -- Stack font dropdown
+    f._initStackFontDrop = function()
+        if not f.stackFontDrop or not UIDropDownMenu_Initialize then return end
+        if not MSWA.fontChoices then MSWA_RebuildFontChoices() end
+        UIDropDownMenu_SetWidth(f.stackFontDrop, 120)
+        if not f._mswaStackFontDropInitialized then
+            UIDropDownMenu_Initialize(f.stackFontDrop, function(self, level)
+                local db = MSWA_GetDB(); local auraKey = MSWA.selectedSpellID
+                local s2 = auraKey and select(1, MSWA_GetSpellSettings(db, auraKey)) or nil
+                local currentKey = (s2 and s2.stackFontKey) or "DEFAULT"
+                for _, data in ipairs(MSWA.fontChoices or {}) do
+                    local info = UIDropDownMenu_CreateInfo()
+                    info.text = data.label or data.key; info.value = data.key; info.checked = (data.key == currentKey)
+                    info.func = function()
+                        local key = MSWA.selectedSpellID; if not key then return end
+                        local ss = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+                        if data.key == "DEFAULT" then ss.stackFontKey = nil else ss.stackFontKey = data.key end
+                        UIDropDownMenu_SetText(f.stackFontDrop, data.label or data.key); CloseDropDownMenus()
+                        MSWA_RequestUpdateSpells()
+                    end
+                    UIDropDownMenu_AddButton(info, level)
+                end
+            end)
+            f._mswaStackFontDropInitialized = true
+        end
+        -- Set current value
+        local db = MSWA_GetDB(); local auraKey = MSWA.selectedSpellID
+        local ss = auraKey and select(1, MSWA_GetSpellSettings(db, auraKey)) or nil
+        local fontKey = (ss and ss.stackFontKey) or "DEFAULT"
+        local label = "Default (Blizzard)"
+        for _, data in ipairs(MSWA.fontChoices or {}) do
+            if data.key == fontKey then label = data.label or data.key; break end
+        end
+        if UIDropDownMenu_SetText then UIDropDownMenu_SetText(f.stackFontDrop, label) end
+    end
+
+    -- Stack size +/-
+    local function ClampStackSize(v) v = tonumber(v) or 12; if v < 6 then v = 6 end; if v > 48 then v = 48 end; return v end
+    local function ApplyStackSize()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local v = ClampStackSize(f.stackSizeEdit and f.stackSizeEdit:GetText())
+        s2.stackFontSize = v; if f.stackSizeEdit then f.stackSizeEdit:SetText(tostring(v)) end; MSWA_RequestUpdateSpells()
+    end
+    if f.stackSizeEdit then
+        f.stackSizeEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyStackSize() end)
+        f.stackSizeEdit:SetScript("OnEditFocusLost", function() ApplyStackSize() end)
+    end
+    f.stackSizeMinus:SetScript("OnClick", function()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local v = ClampStackSize((f.stackSizeEdit and f.stackSizeEdit:GetText()) or (s2.stackFontSize or 12)) - 1; v = ClampStackSize(v)
+        s2.stackFontSize = v; if f.stackSizeEdit then f.stackSizeEdit:SetText(tostring(v)) end; MSWA_RequestUpdateSpells()
+    end)
+    f.stackSizePlus:SetScript("OnClick", function()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local v = ClampStackSize((f.stackSizeEdit and f.stackSizeEdit:GetText()) or (s2.stackFontSize or 12)) + 1; v = ClampStackSize(v)
+        s2.stackFontSize = v; if f.stackSizeEdit then f.stackSizeEdit:SetText(tostring(v)) end; MSWA_RequestUpdateSpells()
+    end)
+
+    -- Stack pos dropdown
+    if f.stackPosDrop and UIDropDownMenu_Initialize then
+        UIDropDownMenu_SetWidth(f.stackPosDrop, 120)
+        UIDropDownMenu_Initialize(f.stackPosDrop, function(self, level)
+            local db = MSWA_GetDB(); local key = MSWA.selectedSpellID
+            local s2 = key and select(1, MSWA_GetSpellSettings(db, key)) or nil
+            local cur = (s2 and s2.stackPoint) or "BOTTOMRIGHT"
+            for _, point in ipairs({"BOTTOMRIGHT","BOTTOMLEFT","TOPRIGHT","TOPLEFT","CENTER"}) do
+                local info = UIDropDownMenu_CreateInfo(); info.text = MSWA_GetTextPosLabel(point); info.checked = (tostring(cur) == tostring(point))
+                info.func = function() local ss = select(1, MSWA_GetOrCreateSpellSettings(db, key)); ss.stackPoint = point; UIDropDownMenu_SetText(f.stackPosDrop, MSWA_GetTextPosLabel(point)); CloseDropDownMenus(); MSWA_RequestUpdateSpells() end
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end)
+    end
+
+    -- Stack color picker
+    f.stackColorBtn:SetScript("OnClick", function()
+        local keyAtOpen = MSWA.selectedSpellID; if not keyAtOpen then return end
+        local db3 = MSWA_GetDB()
+        local ss = keyAtOpen and select(1, MSWA_GetSpellSettings(db3, keyAtOpen)) or nil
+        local tc = (ss and ss.stackColor) or { r = 1, g = 1, b = 1 }
+        local r, g, b = tonumber(tc.r) or 1, tonumber(tc.g) or 1, tonumber(tc.b) or 1
+        local function ApplySC(nr, ng, nb)
+            local s3 = keyAtOpen and select(1, MSWA_GetOrCreateSpellSettings(db3, keyAtOpen)) or nil
+            if s3 then s3.stackColor = s3.stackColor or {}; s3.stackColor.r = nr; s3.stackColor.g = ng; s3.stackColor.b = nb end
+            if f.stackColorSwatch and MSWA_KeyEquals(MSWA.selectedSpellID, keyAtOpen) then f.stackColorSwatch:SetColorTexture(nr, ng, nb, 1) end
+            MSWA_RequestUpdateSpells()
+        end
+        if ColorPickerFrame and ColorPickerFrame.SetupColorPickerAndShow then
+            local function OnChanged() local nr, ng, nb = ColorPickerFrame:GetColorRGB(); if type(nr) == "number" then ApplySC(nr, ng, nb) end end
+            ColorPickerFrame:SetupColorPickerAndShow({ r=r, g=g, b=b, hasOpacity=false, swatchFunc=OnChanged, func=OnChanged, okayFunc=OnChanged, cancelFunc=function(restore) if type(restore) == "table" then ApplySC(restore.r or r, restore.g or g, restore.b or b) else ApplySC(r, g, b) end end })
+        elseif ColorPickerFrame then
+            ColorPickerFrame.hasOpacity = false; ColorPickerFrame.previousValues = { r=r, g=g, b=b }
+            ColorPickerFrame.func = function() ApplySC(ColorPickerFrame:GetColorRGB()) end
+            ColorPickerFrame.cancelFunc = function(prev) if type(prev) == "table" then ApplySC(prev.r or r, prev.g or g, prev.b or b) else ApplySC(r, g, b) end end
+            ColorPickerFrame:SetColorRGB(r, g, b); ColorPickerFrame:Show()
+        end
+    end)
+
+    -- Stack offset apply
+    local function ApplyStackOffset()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.stackOffsetX = tonumber(f.stackOffXEdit:GetText()) or 0
+        s2.stackOffsetY = tonumber(f.stackOffYEdit:GetText()) or 0
+        MSWA_RequestUpdateSpells()
+    end
+    if f.stackOffXEdit then
+        f.stackOffXEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyStackOffset() end)
+        f.stackOffXEdit:SetScript("OnEditFocusLost", function() ApplyStackOffset() end)
+    end
+    if f.stackOffYEdit then
+        f.stackOffYEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyStackOffset() end)
+        f.stackOffYEdit:SetScript("OnEditFocusLost", function() ApplyStackOffset() end)
+    end
 
     -- Apply logic + hooks (identical to original)
     local function ApplyDisplay() local key = MSWA.selectedSpellID; if not key then return end; local db = MSWA_GetDB(); db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[key] or {}

@@ -3,10 +3,17 @@
 -- Namespace, config constants, shared upvalues
 -- ########################################################
 
-local ADDON_NAME = ...
-local MSWA = {}
-_G.MSWA = MSWA
+local ADDON_NAME, MSWA = ...
 
+-- Use the addon private table as our namespace (keeps ns == MSWA across files)
+if type(MSWA) ~= "table" then
+    MSWA = _G.MSWA
+    if type(MSWA) ~= "table" then
+        MSWA = {}
+    end
+end
+
+_G.MSWA = MSWA
 -----------------------------------------------------------
 -- Local upvalues for performance (shared via MSWA table)
 -----------------------------------------------------------

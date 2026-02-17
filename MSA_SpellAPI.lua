@@ -118,9 +118,37 @@ end
 function MSWA_TryComputeExpirationFromRemaining(remaining)
     local okNow, now = pcall(GetTime)
     if not okNow then return nil end
-    local okExp, exp = pcall(SafeAdd, now, remaining)
+    local okExp, exp = pcall(function() return now + remaining end)
     if okExp then return exp end
     return nil
+end
+
+-- Secret-safe: compute glow remaining from cdInfo without comparing secret values
+function MSWA_TryComputeGlowRemaining(cdInfo)
+    if not cdInfo then return 0, false end
+    -- Try via startTime + duration - GetTime()
+    local ok, gr = pcall(function()
+        return (cdInfo.startTime + cdInfo.duration) - GetTime()
+    end)
+    if ok and type(gr) == "number" then
+        if gr > 0 then return gr, true end
+        return 0, false
+    end
+    return 0, false
+end
+
+-- Secret-safe: compute glow remaining from item cooldown values
+function MSWA_TryComputeItemGlowRemaining(start, duration)
+    if not start or not duration then return 0, false end
+    local ok, gr = pcall(function()
+        if start <= 0 or duration <= 1.5 then return nil end
+        return (start + duration) - GetTime()
+    end)
+    if ok and type(gr) == "number" then
+        if gr > 0 then return gr, true end
+        return 0, false
+    end
+    return 0, false
 end
 
 function MSWA_ApplyCooldownFrame(cd, startTime, duration, modRate, expirationTime, durationObj)
@@ -207,39 +235,76 @@ end
 -----------------------------------------------------------
 
 function MSWA_UpdateItemCount(btn, itemID)
-    -- Items/trinkets: never show stack count
-    if not btn or not btn.count then return end
-    btn.count:SetText("")
-    btn.count:Hide()
+    -- Items: show inventory count (bags only, no bank)
+    if not btn or not itemID then return end
+    local target = btn.stackText or btn.count
+    if not target then return end
+    if not GetItemCount then
+        target:SetText(""); target:Hide()
+        return
+    end
+    local ok, count = pcall(GetItemCount, itemID, false, false)
+    if ok and type(count) == "number" then
+        target:SetText(tostring(count))
+        target:Show()
+    else
+        target:SetText(""); target:Hide()
+    end
 end
 
 function MSWA_UpdateBuffVisual(btn, key)
-    if not btn or not btn.count then return end
+    if not btn then return end
 
-    if MSWA_IsItemKey(key) then
-        -- Items: no stack count, keep clean
+    -- Use stackText if available, fallback to btn.count
+    local target = btn.stackText or btn.count
+    if not target then return end
+
+    -- Also keep btn.count hidden when using stackText
+    if btn.stackText and btn.count and btn.stackText ~= btn.count then
         btn.count:SetText("")
         btn.count:Hide()
+    end
+
+    local showMode = MSWA_GetStackShowMode and MSWA_GetStackShowMode(key) or "auto"
+
+    -- Force hide: always hide stacks
+    if showMode == "hide" then
+        target:SetText("")
+        target:Hide()
         return
     end
 
-    local spellID = MSWA_KeyToSpellID(key)
-    if spellID then
-        local auraData = MSWA_GetPlayerAuraDataBySpellID(spellID)
-        local stackText = MSWA_GetAuraStackText(auraData, 1)
-        if not stackText then stackText = MSWA_GetSpellChargesText(spellID) end
-        if stackText then
-            btn.count:SetText(stackText)
-            btn.count:Show()
+    -- Items: show inventory count
+    if MSWA_IsItemKey(key) then
+        local itemID = MSWA_KeyToItemID(key)
+        if itemID then
+            MSWA_UpdateItemCount(btn, itemID)
         else
-            btn.count:SetText("")
-            btn.count:Hide()
+            target:SetText("")
+            target:Hide()
         end
         return
     end
 
-    btn.count:SetText("")
-    btn.count:Hide()
+    -- Spells: aura stacks or charges
+    local spellID = MSWA_KeyToSpellID(key)
+    if spellID then
+        local auraData = MSWA_GetPlayerAuraDataBySpellID(spellID)
+        local minCount = (showMode == "show") and 0 or 1
+        local stackText = MSWA_GetAuraStackText(auraData, minCount)
+        if not stackText then stackText = MSWA_GetSpellChargesText(spellID) end
+        if stackText then
+            target:SetText(stackText)
+            target:Show()
+        else
+            target:SetText("")
+            target:Hide()
+        end
+        return
+    end
+
+    target:SetText("")
+    target:Hide()
 end
 
 -----------------------------------------------------------
@@ -309,14 +374,23 @@ function MSWA_ApplyConditionalTextColor(btn, key, remaining, isOnCooldown)
         end
     end
 
-    -- Apply to btn.count (stack/charge text)
+    -- Apply to btn.count (legacy Masque compat)
     if btn.count and btn.count.SetTextColor then
         btn.count:SetTextColor(fr, fg, fb, 1)
     end
 
+    -- Note: btn.stackText uses its own color via MSWA_ApplyStackStyleToButton
+
     -- Apply to Blizzard cooldown countdown text
     if btn.cooldown then
-        local cdText = FindCooldownText(btn.cooldown)
+        local cdText = btn._mswaCDText
+        if cdText == nil then
+            cdText = FindCooldownText(btn.cooldown)
+            -- Cache result: false means "not found", avoids repeated region scans
+            btn._mswaCDText = cdText or false
+        elseif cdText == false then
+            cdText = nil
+        end
         if cdText and cdText.SetTextColor then
             cdText:SetTextColor(fr, fg, fb, 1)
         end
@@ -340,7 +414,7 @@ function MSWA_ApplySwipeDarken(btn, key)
         if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0.8) end
         if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
     else
-        -- No dark overlay – swipe is transparent
+        -- No dark overlay â€“ swipe is transparent
         if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0) end
     end
 end

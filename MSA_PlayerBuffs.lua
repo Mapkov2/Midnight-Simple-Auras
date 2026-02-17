@@ -92,14 +92,19 @@ function PB.UpdateIcon(iconFrame, spellID)
 
     -- Stacks (display count API returns "" below minCount; we set whatever we get without comparing)
     local stackText = GetAuraStackText(aura, 2)
-    if iconFrame.count then
+    if iconFrame.stackText then
       if type(stackText) == "string" then
-        iconFrame.count:SetText(stackText)
-        iconFrame.count:Show()
+        iconFrame.stackText:SetText(stackText)
+        iconFrame.stackText:Show()
       else
-        iconFrame.count:SetText("")
-        iconFrame.count:Hide()
+        iconFrame.stackText:SetText("")
+        iconFrame.stackText:Hide()
       end
+    end
+    -- Legacy: keep btn.count clean
+    if iconFrame.count then
+      iconFrame.count:SetText("")
+      iconFrame.count:Hide()
     end
 
     if iconFrame.cooldown then
@@ -112,6 +117,11 @@ function PB.UpdateIcon(iconFrame, spellID)
     if iconFrame.count then
       iconFrame.count:SetText("")
       iconFrame.count:Hide()
+    end
+
+    if iconFrame.stackText then
+      iconFrame.stackText:SetText("")
+      iconFrame.stackText:Hide()
     end
 
     if iconFrame.cooldown then

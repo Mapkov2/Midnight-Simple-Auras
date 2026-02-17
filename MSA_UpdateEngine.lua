@@ -1,13 +1,13 @@
 -- ########################################################
--- MSA_UpdateEngine.lua  (v2 â€“ perf + item autobuff)
+-- MSA_UpdateEngine.lua  (v2 Ã¢â‚¬â€œ perf + item autobuff)
 --
 -- Changes vs original:
---   â€¢ 10 Hz throttle (coalesce rapid events)
---   â€¢ ShouldLoad â†’ delegates to MSWA_ShouldLoadAura
---   â€¢ PositionButton moved outside UpdateSpells (no closure alloc)
---   â€¢ Item section: AUTOBUFF mode added (mirrors spell AUTOBUFF)
---   â€¢ Item CD trigger via BAG_UPDATE_COOLDOWN
---   â€¢ Lightweight autobuff tick (no full rebuild per frame)
+--   Ã¢â‚¬Â¢ 10 Hz throttle (coalesce rapid events)
+--   Ã¢â‚¬Â¢ ShouldLoad Ã¢â€ â€™ delegates to MSWA_ShouldLoadAura
+--   Ã¢â‚¬Â¢ PositionButton moved outside UpdateSpells (no closure alloc)
+--   Ã¢â‚¬Â¢ Item section: AUTOBUFF mode added (mirrors spell AUTOBUFF)
+--   Ã¢â‚¬Â¢ Item CD trigger via BAG_UPDATE_COOLDOWN
+--   Ã¢â‚¬Â¢ Lightweight autobuff tick (no full rebuild per frame)
 -- ########################################################
 
 local pairs, type, pcall, tostring, tonumber = pairs, type, pcall, tostring, tonumber
@@ -30,6 +30,7 @@ local MSWA_ClearCooldownFrame    = MSWA_ClearCooldownFrame
 local MSWA_ClearCooldown         = MSWA_ClearCooldown
 local MSWA_UpdateBuffVisual      = MSWA_UpdateBuffVisual
 local MSWA_ApplyTextStyleToButton = MSWA_ApplyTextStyleToButton
+local MSWA_ApplyStackStyleToButton = MSWA_ApplyStackStyleToButton
 local MSWA_ApplyGrayscaleOnCooldownToButton = MSWA_ApplyGrayscaleOnCooldownToButton
 local MSWA_ReskinMasque          = MSWA_ReskinMasque
 local MSWA_TryComputeExpirationFromRemaining = MSWA_TryComputeExpirationFromRemaining
@@ -37,6 +38,8 @@ local MSWA_UpdateGlow            = MSWA_UpdateGlow
 local MSWA_StopGlow              = MSWA_StopGlow
 local MSWA_ApplyConditionalTextColor = MSWA_ApplyConditionalTextColor
 local MSWA_ApplySwipeDarken         = MSWA_ApplySwipeDarken
+local MSWA_TryComputeGlowRemaining  = MSWA_TryComputeGlowRemaining
+local MSWA_TryComputeItemGlowRemaining = MSWA_TryComputeItemGlowRemaining
 
 -----------------------------------------------------------
 -- Constants
@@ -75,7 +78,7 @@ local function WipeIconCache()
 end
 
 -----------------------------------------------------------
--- ShouldLoad â†’ centralized MSWA_ShouldLoadAura
+-- ShouldLoad Ã¢â€ â€™ centralized MSWA_ShouldLoadAura
 -----------------------------------------------------------
 
 local function ShouldLoad(s)
@@ -156,6 +159,7 @@ local function MSWA_UpdateSpells()
                 btn:Show()
                 btn.spellID = key
                 MSWA_ApplyTextStyleToButton(btn, key)
+                if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
 
                 btn:ClearAllPoints()
                 local s = settingsTable[key] or settingsTable[tostring(key)]
@@ -184,11 +188,13 @@ local function MSWA_UpdateSpells()
                         btn:Show()
                         btn.spellID = key
                         MSWA_ApplyTextStyleToButton(btn, key)
+                        if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
                         PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
                         MSWA_ApplyCooldownFrame(btn.cooldown, ab.startTime, buffDur, 1)
                         btn.icon:SetDesaturated(previewOnly)
                         btn:SetAlpha(previewOnly and 0.5 or 1.0)
                         if btn.count then btn.count:SetText(""); btn.count:Hide() end
+                        if btn.stackText then btn.stackText:SetText(""); btn.stackText:Hide() end
                         btn._msaGlowRemaining = buffDur - (GetTime() - ab.startTime)
                         if btn._msaGlowRemaining < 0 then btn._msaGlowRemaining = 0 end
                         btn._msaGlowOnCD = btn._msaGlowRemaining > 0
@@ -198,11 +204,13 @@ local function MSWA_UpdateSpells()
                         btn:Show()
                         btn.spellID = key
                         MSWA_ApplyTextStyleToButton(btn, key)
+                        if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
                         PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
                         MSWA_ClearCooldownFrame(btn.cooldown)
                         btn.icon:SetDesaturated(true)
                         btn:SetAlpha(0.5)
                         if btn.count then btn.count:SetText(""); btn.count:Hide() end
+                        if btn.stackText then btn.stackText:SetText(""); btn.stackText:Hide() end
                         btn._msaGlowRemaining = 0
                         btn._msaGlowOnCD = false
                         index = index + 1
@@ -234,15 +242,10 @@ local function MSWA_UpdateSpells()
                     MSWA_UpdateBuffVisual(btn, key)
                     MSWA_ApplyGrayscaleOnCooldownToButton(btn, key)
 
-                    -- Store glow data for end-of-loop glow pass
-                    if cdInfo and cdInfo.startTime and cdInfo.duration and cdInfo.duration > 0 then
-                        local gr = (cdInfo.startTime + cdInfo.duration) - GetTime()
-                        btn._msaGlowRemaining = gr > 0 and gr or 0
-                        btn._msaGlowOnCD = gr > 0
-                    else
-                        btn._msaGlowRemaining = 0
-                        btn._msaGlowOnCD = false
-                    end
+                    -- Store glow data for end-of-loop glow pass (secret-safe)
+                    local gr, onCD = MSWA_TryComputeGlowRemaining(cdInfo)
+                    btn._msaGlowRemaining = gr
+                    btn._msaGlowOnCD = onCD
 
                     if previewOnly then
                         btn.icon:SetDesaturated(true)
@@ -294,12 +297,14 @@ local function MSWA_UpdateSpells()
                             btn:Show()
                             btn.spellID = key
                             MSWA_ApplyTextStyleToButton(btn, key)
+                            if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
                             btn:ClearAllPoints()
                             PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
                             MSWA_ApplyCooldownFrame(btn.cooldown, ab.startTime, buffDur, 1)
                             btn.icon:SetDesaturated(previewOnly)
                             btn:SetAlpha(previewOnly and 0.5 or 1.0)
                             if btn.count then btn.count:SetText(""); btn.count:Hide() end
+                            if btn.stackText then btn.stackText:SetText(""); btn.stackText:Hide() end
                             btn._msaGlowRemaining = buffDur - (GetTime() - ab.startTime)
                             if btn._msaGlowRemaining < 0 then btn._msaGlowRemaining = 0 end
                             btn._msaGlowOnCD = btn._msaGlowRemaining > 0
@@ -309,12 +314,14 @@ local function MSWA_UpdateSpells()
                             btn:Show()
                             btn.spellID = key
                             MSWA_ApplyTextStyleToButton(btn, key)
+                            if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
                             btn:ClearAllPoints()
                             PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
                             MSWA_ClearCooldownFrame(btn.cooldown)
                             btn.icon:SetDesaturated(true)
                             btn:SetAlpha(0.5)
                             if btn.count then btn.count:SetText(""); btn.count:Hide() end
+                            if btn.stackText then btn.stackText:SetText(""); btn.stackText:Hide() end
                             btn._msaGlowRemaining = 0
                             btn._msaGlowOnCD = false
                             index = index + 1
@@ -332,6 +339,7 @@ local function MSWA_UpdateSpells()
                         btn:Show()
                         btn.spellID = key
                         MSWA_ApplyTextStyleToButton(btn, key)
+                        if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
 
                         btn:ClearAllPoints()
                         PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
@@ -341,15 +349,10 @@ local function MSWA_UpdateSpells()
                         MSWA_UpdateBuffVisual(btn, key)
                         MSWA_ApplyGrayscaleOnCooldownToButton(btn, key)
 
-                        -- Store glow data for end-of-loop glow pass
-                        if start and start > 0 and duration and duration > 1.5 then
-                            local gr = (start + duration) - GetTime()
-                            btn._msaGlowRemaining = gr > 0 and gr or 0
-                            btn._msaGlowOnCD = gr > 0
-                        else
-                            btn._msaGlowRemaining = 0
-                            btn._msaGlowOnCD = false
-                        end
+                        -- Store glow data for end-of-loop glow pass (secret-safe)
+                        local gr, onCD = MSWA_TryComputeItemGlowRemaining(start, duration)
+                        btn._msaGlowRemaining = gr
+                        btn._msaGlowOnCD = onCD
 
                         if previewOnly then
                             btn.icon:SetDesaturated(true)
@@ -391,6 +394,7 @@ local function MSWA_UpdateSpells()
         MSWA_StopGlow(btn)
         btn.spellID = nil
         if btn.count then btn.count:SetText(""); btn.count:Hide() end
+        if btn.stackText then btn.stackText:SetText(""); btn.stackText:Hide() end
     end
 
     MSWA.activeIconCount = index - 1
@@ -627,7 +631,7 @@ end
 -- Auto Buff (Items): cooldown-start detection
 --   Items don't fire UNIT_SPELLCAST_SUCCEEDED reliably,
 --   so we detect when GetItemCooldown transitions from
---   idle â†’ active for tracked AUTOBUFF items.
+--   idle Ã¢â€ â€™ active for tracked AUTOBUFF items.
 -----------------------------------------------------------
 do
     local itemCDFrame = CreateFrame("Frame")
@@ -651,8 +655,19 @@ do
                     local prevStart = lastItemCDStart[key] or 0
 
                     -- Fresh cooldown: start changed AND duration > 1.5s (skip GCD)
-                    if start and start > 0 and duration and duration > 1.5
-                       and start ~= prevStart then
+                    -- Wrap in pcall for secret-value safety
+                    local isFreshCD = false
+                    local isActiveCD = false
+                    pcall(function()
+                        if start and start > 0 and duration and duration > 1.5 then
+                            isActiveCD = true
+                            if start ~= prevStart then
+                                isFreshCD = true
+                            end
+                        end
+                    end)
+
+                    if isFreshCD then
                         local ab = MSWA._autoBuff[key]
                         if not ab or not ab.active then
                             MSWA._autoBuff[key] = {
@@ -663,7 +678,7 @@ do
                         end
                     end
 
-                    if start and start > 0 and duration and duration > 1.5 then
+                    if isActiveCD then
                         lastItemCDStart[key] = start
                     else
                         lastItemCDStart[key] = 0
