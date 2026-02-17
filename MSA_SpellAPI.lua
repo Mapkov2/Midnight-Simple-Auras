@@ -322,3 +322,25 @@ function MSWA_ApplyConditionalTextColor(btn, key, remaining, isOnCooldown)
         end
     end
 end
+
+-----------------------------------------------------------
+-- Swipe darkens on loss (per-aura cooldown swipe toggle)
+-----------------------------------------------------------
+
+function MSWA_ApplySwipeDarken(btn, key)
+    if not btn or not btn.cooldown then return end
+    local cd = btn.cooldown
+
+    local db = MSWA_GetDB()
+    local s = (key ~= nil) and select(1, MSWA_GetSpellSettings(db, key)) or nil
+    local darken = s and s.swipeDarken
+
+    if darken then
+        -- Dark swipe visible (standard WoW look)
+        if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0.8) end
+        if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
+    else
+        -- No dark overlay – swipe is transparent
+        if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0) end
+    end
+end

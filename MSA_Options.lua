@@ -356,6 +356,9 @@ MSWA_UpdateDetailPanel = function()
     if f.grayCooldownCheck then
         f.grayCooldownCheck:SetChecked((s and s.grayOnCooldown) and true or false)
     end
+    if f.swipeDarkenCheck then
+        f.swipeDarkenCheck:SetChecked((s and s.swipeDarken) and true or false)
+    end
 
     -- Sync conditional 2nd text color controls
     if f.tc2Check then
@@ -530,7 +533,7 @@ local function MSWA_CreateOptionsFrame()
     f.resizeGrip = grip
 
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    f.title:SetPoint("LEFT", f.TitleBg, "LEFT", 10, 0); f.title:SetText("Midnight Simple Auras")
+    f.title:SetPoint("LEFT", f.TitleBg, "LEFT", 10, 0); f.title:SetText("Midnight Simple Auras                                                                                                                                                          Version 1.2")
 
     -- Left: Aura list
     local listPanel = CreateFrame("Frame", nil, f, "InsetFrameTemplate3")
@@ -1667,9 +1670,22 @@ local function MSWA_CreateOptionsFrame()
         MSWA_RequestUpdateSpells()
     end)
 
+    -- Swipe darkens on loss
+    f.swipeDarkenCheck = CreateFrame("CheckButton", nil, f.displayPanel, "ChatConfigCheckButtonTemplate")
+    f.swipeDarkenCheck:SetPoint("TOPLEFT", f.grayCooldownCheck, "BOTTOMLEFT", 0, -4)
+    f.swipeDarkenLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.swipeDarkenLabel:SetPoint("LEFT", f.swipeDarkenCheck, "RIGHT", 2, 0)
+    f.swipeDarkenLabel:SetText("Swipe darkens on loss")
+    f.swipeDarkenCheck:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.swipeDarken = self:GetChecked() and true or nil
+        MSWA_RequestUpdateSpells()
+    end)
+
     -- ======= Conditional 2nd Text Color =======
     local tc2Sep = f.displayPanel:CreateTexture(nil, "ARTWORK")
-    tc2Sep:SetPoint("TOPLEFT", f.grayCooldownCheck, "BOTTOMLEFT", 4, -10)
+    tc2Sep:SetPoint("TOPLEFT", f.swipeDarkenCheck, "BOTTOMLEFT", 4, -10)
     tc2Sep:SetSize(400, 1); tc2Sep:SetColorTexture(1, 1, 1, 0.12)
 
     f.tc2Check = CreateFrame("CheckButton", nil, f.displayPanel, "ChatConfigCheckButtonTemplate")

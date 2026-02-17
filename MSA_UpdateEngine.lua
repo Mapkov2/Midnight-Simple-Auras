@@ -36,6 +36,7 @@ local MSWA_TryComputeExpirationFromRemaining = MSWA_TryComputeExpirationFromRema
 local MSWA_UpdateGlow            = MSWA_UpdateGlow
 local MSWA_StopGlow              = MSWA_StopGlow
 local MSWA_ApplyConditionalTextColor = MSWA_ApplyConditionalTextColor
+local MSWA_ApplySwipeDarken         = MSWA_ApplySwipeDarken
 
 -----------------------------------------------------------
 -- Constants
@@ -375,6 +376,7 @@ local function MSWA_UpdateSpells()
             local onCD = btn._msaGlowOnCD or false
             MSWA_UpdateGlow(btn, btn.spellID, rem, onCD)
             MSWA_ApplyConditionalTextColor(btn, btn.spellID, rem, onCD)
+            MSWA_ApplySwipeDarken(btn, btn.spellID)
         end
     end
 
