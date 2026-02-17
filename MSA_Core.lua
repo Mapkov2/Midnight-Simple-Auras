@@ -21,6 +21,7 @@ local wipe            = wipe or table.wipe
 
 local LSM             = LibStub and LibStub("LibSharedMedia-3.0", true)
 local Masque          = LibStub and LibStub("Masque", true)
+local LCG             = LibStub and LibStub("LibCustomGlow-1.0", true)
 
 local GetItemCooldown          = GetItemCooldown
 local GetItemIcon              = GetItemIcon
@@ -34,6 +35,7 @@ local GetItemCount             = GetItemCount
 MSWA.ADDON_NAME = ADDON_NAME
 MSWA.LSM        = LSM
 MSWA.Masque     = Masque
+MSWA.LCG        = LCG
 
 -----------------------------------------------------------
 -- Basic config

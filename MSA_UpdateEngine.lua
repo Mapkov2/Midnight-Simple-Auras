@@ -1,13 +1,13 @@
 -- ########################################################
--- MSA_UpdateEngine.lua  (v2 – perf + item autobuff)
+-- MSA_UpdateEngine.lua  (v2 â€“ perf + item autobuff)
 --
 -- Changes vs original:
---   • 10 Hz throttle (coalesce rapid events)
---   • ShouldLoad → delegates to MSWA_ShouldLoadAura
---   • PositionButton moved outside UpdateSpells (no closure alloc)
---   • Item section: AUTOBUFF mode added (mirrors spell AUTOBUFF)
---   • Item CD trigger via BAG_UPDATE_COOLDOWN
---   • Lightweight autobuff tick (no full rebuild per frame)
+--   â€¢ 10 Hz throttle (coalesce rapid events)
+--   â€¢ ShouldLoad â†’ delegates to MSWA_ShouldLoadAura
+--   â€¢ PositionButton moved outside UpdateSpells (no closure alloc)
+--   â€¢ Item section: AUTOBUFF mode added (mirrors spell AUTOBUFF)
+--   â€¢ Item CD trigger via BAG_UPDATE_COOLDOWN
+--   â€¢ Lightweight autobuff tick (no full rebuild per frame)
 -- ########################################################
 
 local pairs, type, pcall, tostring, tonumber = pairs, type, pcall, tostring, tonumber
@@ -33,6 +33,8 @@ local MSWA_ApplyTextStyleToButton = MSWA_ApplyTextStyleToButton
 local MSWA_ApplyGrayscaleOnCooldownToButton = MSWA_ApplyGrayscaleOnCooldownToButton
 local MSWA_ReskinMasque          = MSWA_ReskinMasque
 local MSWA_TryComputeExpirationFromRemaining = MSWA_TryComputeExpirationFromRemaining
+local MSWA_UpdateGlow            = MSWA_UpdateGlow
+local MSWA_StopGlow              = MSWA_StopGlow
 
 -----------------------------------------------------------
 -- Constants
@@ -71,7 +73,7 @@ local function WipeIconCache()
 end
 
 -----------------------------------------------------------
--- ShouldLoad → centralized MSWA_ShouldLoadAura
+-- ShouldLoad â†’ centralized MSWA_ShouldLoadAura
 -----------------------------------------------------------
 
 local function ShouldLoad(s)
@@ -185,6 +187,9 @@ local function MSWA_UpdateSpells()
                         btn.icon:SetDesaturated(previewOnly)
                         btn:SetAlpha(previewOnly and 0.5 or 1.0)
                         if btn.count then btn.count:SetText(""); btn.count:Hide() end
+                        btn._msaGlowRemaining = buffDur - (GetTime() - ab.startTime)
+                        if btn._msaGlowRemaining < 0 then btn._msaGlowRemaining = 0 end
+                        btn._msaGlowOnCD = btn._msaGlowRemaining > 0
                         index = index + 1
                     elseif previewMode then
                         btn.icon:SetTexture(icon)
@@ -196,11 +201,14 @@ local function MSWA_UpdateSpells()
                         btn.icon:SetDesaturated(true)
                         btn:SetAlpha(0.5)
                         if btn.count then btn.count:SetText(""); btn.count:Hide() end
+                        btn._msaGlowRemaining = 0
+                        btn._msaGlowOnCD = false
                         index = index + 1
                     else
                         btn:Hide()
                         btn.icon:SetTexture(nil)
                         MSWA_ClearCooldownFrame(btn.cooldown)
+                        MSWA_StopGlow(btn)
                         btn.spellID = nil
                     end
 
@@ -223,6 +231,16 @@ local function MSWA_UpdateSpells()
 
                     MSWA_UpdateBuffVisual(btn, key)
                     MSWA_ApplyGrayscaleOnCooldownToButton(btn, key)
+
+                    -- Store glow data for end-of-loop glow pass
+                    if cdInfo and cdInfo.startTime and cdInfo.duration and cdInfo.duration > 0 then
+                        local gr = (cdInfo.startTime + cdInfo.duration) - GetTime()
+                        btn._msaGlowRemaining = gr > 0 and gr or 0
+                        btn._msaGlowOnCD = gr > 0
+                    else
+                        btn._msaGlowRemaining = 0
+                        btn._msaGlowOnCD = false
+                    end
 
                     if previewOnly then
                         btn.icon:SetDesaturated(true)
@@ -280,6 +298,9 @@ local function MSWA_UpdateSpells()
                             btn.icon:SetDesaturated(previewOnly)
                             btn:SetAlpha(previewOnly and 0.5 or 1.0)
                             if btn.count then btn.count:SetText(""); btn.count:Hide() end
+                            btn._msaGlowRemaining = buffDur - (GetTime() - ab.startTime)
+                            if btn._msaGlowRemaining < 0 then btn._msaGlowRemaining = 0 end
+                            btn._msaGlowOnCD = btn._msaGlowRemaining > 0
                             index = index + 1
                         elseif previewMode then
                             btn.icon:SetTexture(tex)
@@ -292,11 +313,14 @@ local function MSWA_UpdateSpells()
                             btn.icon:SetDesaturated(true)
                             btn:SetAlpha(0.5)
                             if btn.count then btn.count:SetText(""); btn.count:Hide() end
+                            btn._msaGlowRemaining = 0
+                            btn._msaGlowOnCD = false
                             index = index + 1
                         else
                             btn:Hide()
                             btn.icon:SetTexture(nil)
                             MSWA_ClearCooldownFrame(btn.cooldown)
+                            MSWA_StopGlow(btn)
                             btn.spellID = nil
                         end
 
@@ -315,6 +339,16 @@ local function MSWA_UpdateSpells()
                         MSWA_UpdateBuffVisual(btn, key)
                         MSWA_ApplyGrayscaleOnCooldownToButton(btn, key)
 
+                        -- Store glow data for end-of-loop glow pass
+                        if start and start > 0 and duration and duration > 1.5 then
+                            local gr = (start + duration) - GetTime()
+                            btn._msaGlowRemaining = gr > 0 and gr or 0
+                            btn._msaGlowOnCD = gr > 0
+                        else
+                            btn._msaGlowRemaining = 0
+                            btn._msaGlowOnCD = false
+                        end
+
                         if previewOnly then
                             btn.icon:SetDesaturated(true)
                             btn:SetAlpha(0.5)
@@ -330,13 +364,24 @@ local function MSWA_UpdateSpells()
     end
 
     -----------------------------------------------------------
-    -- 3) Hide remaining buttons
+    -- 3) Glow pass: apply/remove glow on all visible buttons
+    -----------------------------------------------------------
+    for i = 1, index - 1 do
+        local btn = MSWA.icons[i]
+        if btn and btn:IsShown() and btn.spellID then
+            MSWA_UpdateGlow(btn, btn.spellID, btn._msaGlowRemaining or 0, btn._msaGlowOnCD or false)
+        end
+    end
+
+    -----------------------------------------------------------
+    -- 4) Hide remaining buttons
     -----------------------------------------------------------
     for i = index, MAX_ICONS do
         local btn = MSWA.icons[i]
         btn:Hide()
         btn.icon:SetTexture(nil)
         MSWA_ClearCooldown(btn)
+        MSWA_StopGlow(btn)
         btn.spellID = nil
         if btn.count then btn.count:SetText(""); btn.count:Hide() end
     end
@@ -349,7 +394,7 @@ local function MSWA_UpdateSpells()
     end
 
     -----------------------------------------------------------
-    -- 4) Check if any auto-buff is still active (for engine)
+    -- 5) Check if any auto-buff is still active (for engine)
     -----------------------------------------------------------
     autoBuffActive = false
     local now = GetTime()
@@ -575,7 +620,7 @@ end
 -- Auto Buff (Items): cooldown-start detection
 --   Items don't fire UNIT_SPELLCAST_SUCCEEDED reliably,
 --   so we detect when GetItemCooldown transitions from
---   idle → active for tracked AUTOBUFF items.
+--   idle â†’ active for tracked AUTOBUFF items.
 -----------------------------------------------------------
 do
     local itemCDFrame = CreateFrame("Frame")

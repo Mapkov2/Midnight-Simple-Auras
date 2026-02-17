@@ -246,11 +246,13 @@ MSWA_UpdateDetailPanel = function()
             if f.generalPanel then f.generalPanel:Hide() end
             if f.displayPanel then f.displayPanel:Hide() end
             if f.altPanel then f.altPanel:Hide() end
+            if f.glowPanel2 then f.glowPanel2:Hide() end
             if f.emptyPanel then f.emptyPanel:Hide() end
             if f.groupPanel then f.groupPanel:Hide() end
             if f.groupPanel then f.groupPanel:Show() end
             if f.tabGeneral then f.tabGeneral:Disable() end
             if f.tabDisplay then f.tabDisplay:Disable() end
+            if f.tabGlow then f.tabGlow:Disable() end
             if f.tabImport then f.tabImport:Disable() end
             if f.groupPanel and f.groupPanel.Sync then f.groupPanel:Sync() end
             return
@@ -263,10 +265,12 @@ MSWA_UpdateDetailPanel = function()
         if f.generalPanel then f.generalPanel:Hide() end
         if f.displayPanel then f.displayPanel:Hide() end
         if f.altPanel then f.altPanel:Hide() end
+        if f.glowPanel2 then f.glowPanel2:Hide() end
         if f.emptyPanel then f.emptyPanel:Show() end
         if f.groupPanel then f.groupPanel:Hide() end
         if f.tabGeneral then f.tabGeneral:Disable() end
         if f.tabDisplay then f.tabDisplay:Disable() end
+        if f.tabGlow then f.tabGlow:Disable() end
         if f.tabImport then f.tabImport:Disable() end
         return
     end
@@ -288,20 +292,29 @@ MSWA_UpdateDetailPanel = function()
     if f.groupPanel then f.groupPanel:Hide() end
     if f.tabGeneral then f.tabGeneral:Enable() end
     if f.tabDisplay then f.tabDisplay:Enable() end
+    if f.tabGlow then f.tabGlow:Enable() end
     if f.tabImport then f.tabImport:Enable() end
 
     local tab = f.activeTab or "GENERAL"
     if tab == "DISPLAY" then
         if f.generalPanel then f.generalPanel:Hide() end
         if f.altPanel then f.altPanel:Hide() end
+        if f.glowPanel2 then f.glowPanel2:Hide() end
         if f.displayPanel then f.displayPanel:Show() end
+    elseif tab == "GLOW" then
+        if f.generalPanel then f.generalPanel:Hide() end
+        if f.displayPanel then f.displayPanel:Hide() end
+        if f.altPanel then f.altPanel:Hide() end
+        if f.glowPanel2 then f.glowPanel2:Show(); if f.glowPanel2.Sync then f.glowPanel2:Sync() end end
     elseif tab == "IMPORT" then
         if f.generalPanel then f.generalPanel:Hide() end
         if f.displayPanel then f.displayPanel:Hide() end
+        if f.glowPanel2 then f.glowPanel2:Hide() end
         if f.altPanel then f.altPanel:Show(); if f.altPanel.Sync then f.altPanel:Sync() end end
     else
         if f.displayPanel then f.displayPanel:Hide() end
         if f.altPanel then f.altPanel:Hide() end
+        if f.glowPanel2 then f.glowPanel2:Hide() end
         if f.generalPanel then f.generalPanel:Show() end
     end
 
@@ -757,14 +770,16 @@ local function MSWA_CreateOptionsFrame()
     f.rightTitle = rightPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     f.rightTitle:SetPoint("TOP", 0, -10); f.rightTitle:SetText("Select an Aura")
 
-    local tabW, tabH = 90, 20
+    local tabW, tabH = 80, 20
     local function SetActiveTab(tabKey)
         f.activeTab = tabKey
         if f.tabGeneral then f.tabGeneral:UnlockHighlight() end
         if f.tabDisplay then f.tabDisplay:UnlockHighlight() end
+        if f.tabGlow then f.tabGlow:UnlockHighlight() end
         if f.tabImport then f.tabImport:UnlockHighlight() end
         if tabKey == "GENERAL" and f.tabGeneral then f.tabGeneral:LockHighlight() end
         if tabKey == "DISPLAY" and f.tabDisplay then f.tabDisplay:LockHighlight() end
+        if tabKey == "GLOW" and f.tabGlow then f.tabGlow:LockHighlight() end
         if tabKey == "IMPORT" and f.tabImport then f.tabImport:LockHighlight() end
         MSWA_UpdateDetailPanel()
     end
@@ -772,12 +787,15 @@ local function MSWA_CreateOptionsFrame()
     f.tabGeneral = CreateFrame("Button", nil, rightPanel, "UIPanelButtonTemplate"); f.tabGeneral:SetSize(tabW, tabH)
     f.tabGeneral:SetPoint("TOPLEFT", 14, -36); f.tabGeneral:SetText("General")
     f.tabDisplay = CreateFrame("Button", nil, rightPanel, "UIPanelButtonTemplate"); f.tabDisplay:SetSize(tabW, tabH)
-    f.tabDisplay:SetPoint("LEFT", f.tabGeneral, "RIGHT", 6, 0); f.tabDisplay:SetText("Display")
+    f.tabDisplay:SetPoint("LEFT", f.tabGeneral, "RIGHT", 4, 0); f.tabDisplay:SetText("Display")
+    f.tabGlow = CreateFrame("Button", nil, rightPanel, "UIPanelButtonTemplate"); f.tabGlow:SetSize(tabW, tabH)
+    f.tabGlow:SetPoint("LEFT", f.tabDisplay, "RIGHT", 4, 0); f.tabGlow:SetText("Glow")
     f.tabImport = CreateFrame("Button", nil, rightPanel, "UIPanelButtonTemplate"); f.tabImport:SetSize(tabW, tabH)
-    f.tabImport:SetPoint("LEFT", f.tabDisplay, "RIGHT", 6, 0); f.tabImport:SetText("Load Info")
+    f.tabImport:SetPoint("LEFT", f.tabGlow, "RIGHT", 4, 0); f.tabImport:SetText("Load Info")
 
     f.tabGeneral:SetScript("OnClick", function() SetActiveTab("GENERAL") end)
     f.tabDisplay:SetScript("OnClick", function() SetActiveTab("DISPLAY") end)
+    f.tabGlow:SetScript("OnClick", function() SetActiveTab("GLOW") end)
     f.tabImport:SetScript("OnClick", function() SetActiveTab("IMPORT") end)
     f.activeTab = "GENERAL"; f.tabGeneral:LockHighlight()
 
@@ -1172,6 +1190,326 @@ local function MSWA_CreateOptionsFrame()
         f.groupYEdit:SetText(tostring(g.y or 0)); f.groupSizeEdit:SetText(tostring(g.size or MSWA.ICON_SIZE))
     end
 
+    -- =========================================================
+    -- Glow tab panel  (LibCustomGlow integration)
+    -- =========================================================
+    f.glowPanel2 = CreateFrame("Frame", nil, rightPanel)
+    f.glowPanel2:SetPoint("TOPLEFT", 12, -60); f.glowPanel2:SetPoint("BOTTOMRIGHT", -12, 12); f.glowPanel2:Hide()
+
+    local glowAvailable = MSWA_IsGlowAvailable and MSWA_IsGlowAvailable() or false
+
+    local glowTitle = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    glowTitle:SetPoint("TOPLEFT", 10, -6)
+    glowTitle:SetText(glowAvailable and "|cffffcc00Glow Settings|r" or "|cffff4040Glow (LibCustomGlow not found)|r")
+
+    -- Enable checkbox
+    f.glowEnableCheck = CreateFrame("CheckButton", nil, f.glowPanel2, "ChatConfigCheckButtonTemplate")
+    f.glowEnableCheck:SetPoint("TOPLEFT", glowTitle, "BOTTOMLEFT", -4, -10)
+    f.glowEnableLabel = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.glowEnableLabel:SetPoint("LEFT", f.glowEnableCheck, "RIGHT", 2, 0)
+    f.glowEnableLabel:SetText("Enable Glow")
+
+    -- Glow Type dropdown
+    local glowTypeLabel = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    glowTypeLabel:SetPoint("TOPLEFT", f.glowEnableCheck, "BOTTOMLEFT", 4, -12)
+    glowTypeLabel:SetText("|cffffcc00Type:|r")
+    f.glowTypeDrop = CreateFrame("Frame", "MSWA_GlowTypeDropDown", f.glowPanel2, "UIDropDownMenuTemplate")
+    f.glowTypeDrop:SetPoint("LEFT", glowTypeLabel, "RIGHT", -10, -3)
+    if UIDropDownMenu_SetWidth then UIDropDownMenu_SetWidth(f.glowTypeDrop, 140) end
+
+    UIDropDownMenu_Initialize(f.glowTypeDrop, function(self, level)
+        level = level or 1
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = MSWA_GetAuraSettings and MSWA_GetAuraSettings(key) or nil
+        local gs = s2 and s2.glow or {}
+        local curType = gs.glowType or "PIXEL"
+
+        for _, typeKey in ipairs(MSWA.GLOW_TYPE_ORDER or {}) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = MSWA.GLOW_TYPES[typeKey] or typeKey
+            info.value = typeKey
+            info.checked = (curType == typeKey)
+            info.func = function()
+                local k = MSWA.selectedSpellID; if not k then return end
+                local ss = MSWA_EnsureAuraSettings(k)
+                local g = MSWA_GetOrCreateGlowSettings(ss)
+                g.glowType = typeKey
+                UIDropDownMenu_SetText(f.glowTypeDrop, MSWA.GLOW_TYPES[typeKey])
+                CloseDropDownMenus()
+                MSWA_RequestUpdateSpells()
+                if f.glowPanel2 and f.glowPanel2.Sync then f.glowPanel2:Sync() end
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+
+    -- Glow Color
+    local glowColorLabel = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    glowColorLabel:SetPoint("LEFT", f.glowTypeDrop, "RIGHT", 4, 3)
+    glowColorLabel:SetText("|cffffcc00Color:|r")
+    f.glowColorBtn = CreateFrame("Button", nil, f.glowPanel2)
+    f.glowColorBtn:SetSize(20, 20); f.glowColorBtn:SetPoint("LEFT", glowColorLabel, "RIGHT", 6, 0); f.glowColorBtn:EnableMouse(true)
+    f.glowColorSwatch = f.glowColorBtn:CreateTexture(nil, "ARTWORK"); f.glowColorSwatch:SetAllPoints(true); f.glowColorSwatch:SetColorTexture(0.95, 0.95, 0.32, 1)
+    local glowColorBorder = f.glowColorBtn:CreateTexture(nil, "BORDER"); glowColorBorder:SetPoint("TOPLEFT", -1, 1); glowColorBorder:SetPoint("BOTTOMRIGHT", 1, -1); glowColorBorder:SetColorTexture(0, 0, 0, 1)
+
+    f.glowColorBtn:SetScript("OnClick", function()
+        local keyAtOpen = MSWA.selectedSpellID; if not keyAtOpen then return end
+        local ss = MSWA_GetAuraSettings(keyAtOpen) or {}
+        local gs = ss.glow or {}
+        local gc = gs.color or { r = 0.95, g = 0.95, b = 0.32, a = 1 }
+        local r, g, b = tonumber(gc.r) or 0.95, tonumber(gc.g) or 0.95, tonumber(gc.b) or 0.32
+
+        local function ApplyGlowColor(nr, ng, nb)
+            local ss2 = MSWA_EnsureAuraSettings(keyAtOpen)
+            local g2 = MSWA_GetOrCreateGlowSettings(ss2)
+            g2.color = g2.color or {}
+            g2.color.r = nr; g2.color.g = ng; g2.color.b = nb; g2.color.a = 1
+            if f.glowColorSwatch then f.glowColorSwatch:SetColorTexture(nr, ng, nb, 1) end
+            MSWA_RequestUpdateSpells()
+        end
+
+        if ColorPickerFrame and ColorPickerFrame.SetupColorPickerAndShow then
+            local function OnChanged() local nr, ng, nb = ColorPickerFrame:GetColorRGB(); if type(nr) == "number" then ApplyGlowColor(nr, ng, nb) end end
+            ColorPickerFrame:SetupColorPickerAndShow({ r=r, g=g, b=b, hasOpacity=false, swatchFunc=OnChanged, func=OnChanged, okayFunc=OnChanged, cancelFunc=function(restore) if type(restore) == "table" then ApplyGlowColor(restore.r or r, restore.g or g, restore.b or b) else ApplyGlowColor(r, g, b) end end })
+        elseif ColorPickerFrame then
+            ColorPickerFrame.hasOpacity = false; ColorPickerFrame.previousValues = { r=r, g=g, b=b }
+            ColorPickerFrame.func = function() ApplyGlowColor(ColorPickerFrame:GetColorRGB()) end
+            ColorPickerFrame.cancelFunc = function(prev) if type(prev) == "table" then ApplyGlowColor(prev.r or r, prev.g or g, prev.b or b) else ApplyGlowColor(r, g, b) end end
+            ColorPickerFrame:SetColorRGB(r, g, b); ColorPickerFrame:Show()
+        end
+    end)
+
+    -- Condition dropdown
+    local glowCondLabel = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    glowCondLabel:SetPoint("TOPLEFT", glowTypeLabel, "BOTTOMLEFT", 0, -20)
+    glowCondLabel:SetText("|cffffcc00Condition:|r")
+    f.glowCondDrop = CreateFrame("Frame", "MSWA_GlowCondDropDown", f.glowPanel2, "UIDropDownMenuTemplate")
+    f.glowCondDrop:SetPoint("LEFT", glowCondLabel, "RIGHT", -10, -3)
+    if UIDropDownMenu_SetWidth then UIDropDownMenu_SetWidth(f.glowCondDrop, 140) end
+
+    UIDropDownMenu_Initialize(f.glowCondDrop, function(self, level)
+        level = level or 1
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = MSWA_GetAuraSettings and MSWA_GetAuraSettings(key) or nil
+        local gs = s2 and s2.glow or {}
+        local curCond = gs.condition or "ALWAYS"
+
+        for _, condKey in ipairs(MSWA.GLOW_COND_ORDER or {}) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = MSWA.GLOW_CONDITIONS[condKey] or condKey
+            info.value = condKey
+            info.checked = (curCond == condKey)
+            info.func = function()
+                local k = MSWA.selectedSpellID; if not k then return end
+                local ss = MSWA_EnsureAuraSettings(k)
+                local g2 = MSWA_GetOrCreateGlowSettings(ss)
+                g2.condition = condKey
+                UIDropDownMenu_SetText(f.glowCondDrop, MSWA.GLOW_CONDITIONS[condKey])
+                CloseDropDownMenus()
+                MSWA_RequestUpdateSpells()
+                if f.glowPanel2 and f.glowPanel2.Sync then f.glowPanel2:Sync() end
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+
+    -- Condition Value
+    f.glowCondValueLabel = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.glowCondValueLabel:SetPoint("LEFT", f.glowCondDrop, "RIGHT", 4, 3)
+    f.glowCondValueLabel:SetText("Seconds:")
+    f.glowCondValueEdit = CreateFrame("EditBox", nil, f.glowPanel2, "InputBoxTemplate")
+    f.glowCondValueEdit:SetSize(50, 20); f.glowCondValueEdit:SetPoint("LEFT", f.glowCondValueLabel, "RIGHT", 6, 0)
+    f.glowCondValueEdit:SetAutoFocus(false)
+
+    local function ApplyGlowCondValue()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local ss = MSWA_EnsureAuraSettings(key)
+        local g2 = MSWA_GetOrCreateGlowSettings(ss)
+        local v = tonumber(f.glowCondValueEdit:GetText())
+        if v and v >= 0 then g2.conditionValue = v end
+        MSWA_RequestUpdateSpells()
+    end
+    f.glowCondValueEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyGlowCondValue() end)
+    f.glowCondValueEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    f.glowCondValueEdit:SetScript("OnEditFocusLost", function() ApplyGlowCondValue() end)
+
+    -- Separator
+    local glowSep = f.glowPanel2:CreateTexture(nil, "ARTWORK")
+    glowSep:SetPoint("TOPLEFT", glowCondLabel, "BOTTOMLEFT", 0, -24)
+    glowSep:SetSize(400, 1); glowSep:SetColorTexture(1, 1, 1, 0.15)
+
+    -- Per-type settings header
+    local glowDetailTitle = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    glowDetailTitle:SetPoint("TOPLEFT", glowSep, "BOTTOMLEFT", 0, -10)
+    glowDetailTitle:SetText("|cffffcc00Fine-Tuning:|r")
+
+    -- Lines / Particles
+    f.glowLinesLabel = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.glowLinesLabel:SetPoint("TOPLEFT", glowDetailTitle, "BOTTOMLEFT", 0, -10)
+    f.glowLinesLabel:SetText("Lines / Particles:")
+    f.glowLinesEdit = CreateFrame("EditBox", nil, f.glowPanel2, "InputBoxTemplate")
+    f.glowLinesEdit:SetSize(40, 20); f.glowLinesEdit:SetPoint("LEFT", f.glowLinesLabel, "RIGHT", 6, 0)
+    f.glowLinesEdit:SetAutoFocus(false); f.glowLinesEdit:SetNumeric(true)
+
+    -- Frequency
+    f.glowFreqLabel = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.glowFreqLabel:SetPoint("LEFT", f.glowLinesEdit, "RIGHT", 16, 0)
+    f.glowFreqLabel:SetText("Speed:")
+    f.glowFreqEdit = CreateFrame("EditBox", nil, f.glowPanel2, "InputBoxTemplate")
+    f.glowFreqEdit:SetSize(50, 20); f.glowFreqEdit:SetPoint("LEFT", f.glowFreqLabel, "RIGHT", 6, 0)
+    f.glowFreqEdit:SetAutoFocus(false)
+
+    -- Thickness / Scale
+    f.glowThickLabel = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.glowThickLabel:SetPoint("TOPLEFT", f.glowLinesLabel, "BOTTOMLEFT", 0, -10)
+    f.glowThickLabel:SetText("Thickness / Scale:")
+    f.glowThickEdit = CreateFrame("EditBox", nil, f.glowPanel2, "InputBoxTemplate")
+    f.glowThickEdit:SetSize(50, 20); f.glowThickEdit:SetPoint("LEFT", f.glowThickLabel, "RIGHT", 6, 0)
+    f.glowThickEdit:SetAutoFocus(false)
+
+    -- Duration (for Proc Glow)
+    f.glowDurLabel = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.glowDurLabel:SetPoint("LEFT", f.glowThickEdit, "RIGHT", 16, 0)
+    f.glowDurLabel:SetText("Duration:")
+    f.glowDurEdit = CreateFrame("EditBox", nil, f.glowPanel2, "InputBoxTemplate")
+    f.glowDurEdit:SetSize(50, 20); f.glowDurEdit:SetPoint("LEFT", f.glowDurLabel, "RIGHT", 6, 0)
+    f.glowDurEdit:SetAutoFocus(false)
+
+    -- Apply hooks for fine-tuning fields
+    local function ApplyGlowDetails()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local ss = MSWA_EnsureAuraSettings(key)
+        local g2 = MSWA_GetOrCreateGlowSettings(ss)
+        local lines = tonumber(f.glowLinesEdit:GetText())
+        local freq  = tonumber(f.glowFreqEdit:GetText())
+        local thick = tonumber(f.glowThickEdit:GetText())
+        local dur   = tonumber(f.glowDurEdit:GetText())
+        if lines and lines >= 1 and lines <= 32 then g2.lines = lines end
+        if freq then g2.frequency = freq end
+        if thick and thick > 0 then
+            g2.thickness = thick
+            g2.scale = thick
+        end
+        if dur and dur > 0 then g2.duration = dur end
+        -- Force glow refresh by stopping all and re-evaluating
+        if MSWA_StopAllGlows then MSWA_StopAllGlows() end
+        MSWA_RequestUpdateSpells()
+    end
+    local function HookGlowBox(box)
+        box:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyGlowDetails() end)
+        box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        box:SetScript("OnEditFocusLost", function() ApplyGlowDetails() end)
+    end
+    HookGlowBox(f.glowLinesEdit); HookGlowBox(f.glowFreqEdit); HookGlowBox(f.glowThickEdit); HookGlowBox(f.glowDurEdit)
+
+    -- Enable checkbox handler
+    f.glowEnableCheck:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local ss = MSWA_EnsureAuraSettings(key)
+        local g2 = MSWA_GetOrCreateGlowSettings(ss)
+        g2.enabled = self:GetChecked() and true or false
+        if not g2.enabled and MSWA_StopAllGlows then MSWA_StopAllGlows() end
+        MSWA_RequestUpdateSpells()
+        if f.glowPanel2 and f.glowPanel2.Sync then f.glowPanel2:Sync() end
+    end)
+
+    -- Hint text
+    local glowHint = f.glowPanel2:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    glowHint:SetPoint("BOTTOMLEFT", f.glowPanel2, "BOTTOMLEFT", 10, 10)
+    glowHint:SetWidth(420); glowHint:SetJustifyH("LEFT"); glowHint:SetWordWrap(true)
+    glowHint:SetText("|cff888888Pixel Glow: lines rotate around icon. AutoCast: sparkle particles. Button: Blizzard proc glow. Proc: animated overlay.|r")
+
+    -- Sync function
+    function f.glowPanel2:Sync()
+        local key = MSWA.selectedSpellID
+        if not key then return end
+        local s2 = MSWA_GetAuraSettings and MSWA_GetAuraSettings(key) or nil
+        local gs = (s2 and s2.glow) or {}
+        local defaults = MSWA.GLOW_DEFAULTS or {}
+        local enabled = gs.enabled and true or false
+        local glowType = gs.glowType or "PIXEL"
+        local cond = gs.condition or "ALWAYS"
+
+        f.glowEnableCheck:SetChecked(enabled)
+
+        -- Type dropdown text
+        UIDropDownMenu_SetText(f.glowTypeDrop, (MSWA.GLOW_TYPES or {})[glowType] or "Pixel Glow")
+
+        -- Condition dropdown text
+        UIDropDownMenu_SetText(f.glowCondDrop, (MSWA.GLOW_CONDITIONS or {})[cond] or "Always")
+
+        -- Condition value visibility
+        local showValue = (cond == "TIMER_BELOW" or cond == "TIMER_ABOVE")
+        f.glowCondValueLabel:SetShown(showValue)
+        f.glowCondValueEdit:SetShown(showValue)
+        if showValue then
+            f.glowCondValueEdit:SetText(tostring(gs.conditionValue or defaults.conditionValue or 5))
+        end
+
+        -- Color swatch
+        local gc = gs.color or defaults.color or { r = 0.95, g = 0.95, b = 0.32, a = 1 }
+        f.glowColorSwatch:SetColorTexture(tonumber(gc.r) or 0.95, tonumber(gc.g) or 0.95, tonumber(gc.b) or 0.32, 1)
+
+        -- Per-type labels and values
+        if glowType == "PIXEL" then
+            f.glowLinesLabel:SetText("Lines:"); f.glowLinesLabel:Show(); f.glowLinesEdit:Show()
+            f.glowThickLabel:SetText("Thickness:"); f.glowThickLabel:Show(); f.glowThickEdit:Show()
+            f.glowDurLabel:Hide(); f.glowDurEdit:Hide()
+            f.glowLinesEdit:SetText(tostring(gs.lines or defaults.lines or 8))
+            f.glowFreqEdit:SetText(tostring(gs.frequency or defaults.frequency or 0.25))
+            f.glowThickEdit:SetText(tostring(gs.thickness or defaults.thickness or 2))
+        elseif glowType == "AUTOCAST" then
+            f.glowLinesLabel:SetText("Particles:"); f.glowLinesLabel:Show(); f.glowLinesEdit:Show()
+            f.glowThickLabel:SetText("Scale:"); f.glowThickLabel:Show(); f.glowThickEdit:Show()
+            f.glowDurLabel:Hide(); f.glowDurEdit:Hide()
+            f.glowLinesEdit:SetText(tostring(gs.lines or 4))
+            f.glowFreqEdit:SetText(tostring(gs.frequency or 0.125))
+            f.glowThickEdit:SetText(tostring(gs.scale or defaults.scale or 1))
+        elseif glowType == "BUTTON" then
+            f.glowLinesLabel:Hide(); f.glowLinesEdit:Hide()
+            f.glowThickLabel:Hide(); f.glowThickEdit:Hide()
+            f.glowDurLabel:Hide(); f.glowDurEdit:Hide()
+            f.glowFreqEdit:SetText(tostring(gs.frequency or 0.125))
+        elseif glowType == "PROC" then
+            f.glowLinesLabel:Hide(); f.glowLinesEdit:Hide()
+            f.glowThickLabel:Hide(); f.glowThickEdit:Hide()
+            f.glowDurLabel:Show(); f.glowDurEdit:Show()
+            f.glowFreqEdit:SetText(tostring(gs.frequency or 0.25))
+            f.glowDurEdit:SetText(tostring(gs.duration or defaults.duration or 1))
+        end
+
+        -- Disable controls if glow is not available
+        if not glowAvailable then
+            f.glowEnableCheck:Disable()
+            if UIDropDownMenu_DisableDropDown then
+                UIDropDownMenu_DisableDropDown(f.glowTypeDrop)
+                UIDropDownMenu_DisableDropDown(f.glowCondDrop)
+            end
+            f.glowCondValueEdit:Disable(); f.glowLinesEdit:Disable()
+            f.glowFreqEdit:Disable(); f.glowThickEdit:Disable(); f.glowDurEdit:Disable()
+            f.glowColorBtn:Disable()
+        else
+            f.glowEnableCheck:Enable()
+            if enabled then
+                if UIDropDownMenu_EnableDropDown then
+                    UIDropDownMenu_EnableDropDown(f.glowTypeDrop)
+                    UIDropDownMenu_EnableDropDown(f.glowCondDrop)
+                end
+                f.glowCondValueEdit:Enable(); f.glowLinesEdit:Enable()
+                f.glowFreqEdit:Enable(); f.glowThickEdit:Enable(); f.glowDurEdit:Enable()
+                f.glowColorBtn:Enable()
+            else
+                if UIDropDownMenu_DisableDropDown then
+                    UIDropDownMenu_DisableDropDown(f.glowTypeDrop)
+                    UIDropDownMenu_DisableDropDown(f.glowCondDrop)
+                end
+                f.glowCondValueEdit:Disable(); f.glowLinesEdit:Disable()
+                f.glowFreqEdit:Disable(); f.glowThickEdit:Disable(); f.glowDurEdit:Disable()
+                f.glowColorBtn:Disable()
+            end
+        end
+    end
+
     -- General tab
     f.generalPanel = CreateFrame("Frame", nil, rightPanel)
     f.generalPanel:SetPoint("TOPLEFT", 12, -60); f.generalPanel:SetPoint("BOTTOMRIGHT", -12, 12); f.generalPanel:Hide()
@@ -1389,7 +1727,7 @@ local function MSWA_CreateOptionsFrame()
         MSWA.selectedSpellID = nil; MSWA.selectedGroupID = nil; MSWA.previewMode = false
         if f.btnPreview then f.btnPreview:SetText("Preview") end
         f.activeTab = "GENERAL"
-        if f.tabGeneral then f.tabGeneral:LockHighlight() end; if f.tabDisplay then f.tabDisplay:UnlockHighlight() end; if f.tabImport then f.tabImport:UnlockHighlight() end
+        if f.tabGeneral then f.tabGeneral:LockHighlight() end; if f.tabDisplay then f.tabDisplay:UnlockHighlight() end; if f.tabGlow then f.tabGlow:UnlockHighlight() end; if f.tabImport then f.tabImport:UnlockHighlight() end
         f:UpdateAuraList(); MSWA_ApplyUIFont()
     end)
     f:SetScript("OnHide", function()
