@@ -191,39 +191,39 @@ end
 
 local hasGetRemaining = C_Spell and C_Spell.GetSpellCooldownRemaining
 
+-- Spell cooldown values are tainted in Midnight — pcall required for comparisons.
+-- Returns (remaining, isOnCooldown).
+-- If tainted, remaining=0 but isOnCooldown may still be true (from pcall success on SetCooldown).
 function MSWA_GetSpellGlowRemaining(spellID)
     if not spellID then return 0, false end
-    -- All cdInfo fields can be secret/tainted in Midnight, so pcall everything
-    local hasGetCD = C_Spell and C_Spell.GetSpellCooldown
-    if not hasGetCD then return 0, false end
-    local ok, rem, onCD = pcall(function()
-        local cdInfo = C_Spell.GetSpellCooldown(spellID)
-        if not cdInfo then return 0, false end
-        local st, dur = cdInfo.startTime, cdInfo.duration
-        if not st or not dur or st <= 0 or dur <= 1.5 then return 0, false end
-        local remaining = (st + dur) - GetTime()
-        -- Refine with GetSpellCooldownRemaining if available
-        if hasGetRemaining then
-            local r = C_Spell.GetSpellCooldownRemaining(spellID)
-            if type(r) == "number" and r > 0 then
-                remaining = r
-            end
-        end
-        if remaining > 0 then return remaining, true end
-        return 0, false
+    if not (C_Spell and C_Spell.GetSpellCooldown) then return 0, false end
+    local cdInfo = C_Spell.GetSpellCooldown(spellID)
+    if not cdInfo then return 0, false end
+    local ok, remaining = pcall(function()
+        local st  = cdInfo.startTime
+        local dur = cdInfo.duration
+        if st <= 0 or dur <= 1.5 then return 0 end
+        return (st + dur) - GetTime()
     end)
-    if ok then return rem, onCD end
+    if ok and type(remaining) == "number" and remaining > 0 then
+        return remaining, true
+    elseif ok then
+        return 0, false
+    end
+    -- pcall failed (tainted) — remaining unknown, but caller should use
+    -- IsCooldownActive(btn) for the boolean instead
     return 0, false
 end
 
+-- Item cooldowns — also pcall-wrapped for safety
 function MSWA_GetItemGlowRemaining(start, duration)
     if not start or not duration then return 0, false end
-    local ok, gr = pcall(function()
-        if start <= 0 or duration <= 1.5 then return nil end
+    local ok, remaining = pcall(function()
+        if start <= 0 or duration <= 1.5 then return 0 end
         return (start + duration) - GetTime()
     end)
-    if ok and type(gr) == "number" and gr > 0 then
-        return gr, true
+    if ok and type(remaining) == "number" and remaining > 0 then
+        return remaining, true
     end
     return 0, false
 end

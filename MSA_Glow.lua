@@ -163,10 +163,8 @@ function MSWA_UpdateGlow_Fast(btn, gs, remaining, isOnCooldown)
     if ShouldGlow(gs, remaining, isOnCooldown) then
         local newType = gs.glowType or "PIXEL"
         if btn._msaGlowActive and btn._msaGlowType == newType then
-            -- Already glowing with correct type, don't restart animation
-            return
+            return -- already glowing with correct type
         end
-        -- Type changed or glow just became active
         if btn._msaGlowActive then
             StopGlowOnButton(btn)
         end

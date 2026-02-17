@@ -375,9 +375,23 @@ MSWA_UpdateDetailPanel = function()
     end
 
     -- Sync conditional 2nd text color controls
+    -- Timer-based text color only works for AUTOBUFF (we compute remaining ourselves);
+    -- for spell/item CDs the values are tainted and can't be compared reliably
+    local isAutoBuff = s and s.auraMode == "AUTOBUFF"
     if f.tc2Check then
-        local tc2en = (s and s.textColor2Enabled) and true or false
-        f.tc2Check:SetChecked(tc2en)
+        local canUseTC2 = isAutoBuff
+        f.tc2Check:SetShown(canUseTC2)
+        if f.tc2Label then f.tc2Label:SetShown(canUseTC2) end
+        if f.tc2ColorLabel then f.tc2ColorLabel:SetShown(canUseTC2) end
+        if f.tc2ColorBtn then f.tc2ColorBtn:SetShown(canUseTC2) end
+        if f.tc2CondLabel then f.tc2CondLabel:SetShown(canUseTC2) end
+        if f.tc2CondButton then f.tc2CondButton:SetShown(canUseTC2) end
+        if f.tc2ValueEdit then f.tc2ValueEdit:SetShown(canUseTC2) end
+        if f.tc2ValueLabel then f.tc2ValueLabel:SetShown(canUseTC2) end
+
+        if canUseTC2 then
+            local tc2en = (s and s.textColor2Enabled) and true or false
+            f.tc2Check:SetChecked(tc2en)
         -- Color swatch
         if f.tc2ColorSwatch then
             local tc2 = (s and s.textColor2) or { r = 1, g = 0.2, b = 0.2 }
@@ -404,6 +418,7 @@ MSWA_UpdateDetailPanel = function()
         if f.tc2ColorLabel then f.tc2ColorLabel:SetAlpha(enSub and 1 or 0.4) end
         if f.tc2CondLabel then f.tc2CondLabel:SetAlpha(enSub and 1 or 0.4) end
         if f.tc2ValueLabel then f.tc2ValueLabel:SetAlpha(enSub and 1 or 0.4) end
+        end -- canUseTC2
     end
 
     -- Sync Stack controls
@@ -1412,23 +1427,28 @@ local function MSWA_CreateOptionsFrame()
         local s2 = MSWA_GetAuraSettings and MSWA_GetAuraSettings(key) or nil
         local gs = s2 and s2.glow or {}
         local curCond = gs.condition or "ALWAYS"
+        local isAutoBuff = s2 and s2.auraMode == "AUTOBUFF"
 
         for _, condKey in ipairs(MSWA.GLOW_COND_ORDER or {}) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = MSWA.GLOW_CONDITIONS[condKey] or condKey
-            info.value = condKey
-            info.checked = (curCond == condKey)
-            info.func = function()
-                local k = MSWA.selectedSpellID; if not k then return end
-                local ss = MSWA_EnsureAuraSettings(k)
-                local g2 = MSWA_GetOrCreateGlowSettings(ss)
-                g2.condition = condKey
-                UIDropDownMenu_SetText(f.glowCondDrop, MSWA.GLOW_CONDITIONS[condKey])
-                CloseDropDownMenus()
-                MSWA_RequestUpdateSpells()
-                if f.glowPanel2 and f.glowPanel2.Sync then f.glowPanel2:Sync() end
+            -- Timer conditions only available for AUTOBUFF (we compute remaining ourselves);
+            -- for spell/item CDs the Blizzard API values are tainted and can't be compared
+            if isAutoBuff or (condKey ~= "TIMER_BELOW" and condKey ~= "TIMER_ABOVE") then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = MSWA.GLOW_CONDITIONS[condKey] or condKey
+                info.value = condKey
+                info.checked = (curCond == condKey)
+                info.func = function()
+                    local k = MSWA.selectedSpellID; if not k then return end
+                    local ss = MSWA_EnsureAuraSettings(k)
+                    local g2 = MSWA_GetOrCreateGlowSettings(ss)
+                    g2.condition = condKey
+                    UIDropDownMenu_SetText(f.glowCondDrop, MSWA.GLOW_CONDITIONS[condKey])
+                    CloseDropDownMenus()
+                    MSWA_RequestUpdateSpells()
+                    if f.glowPanel2 and f.glowPanel2.Sync then f.glowPanel2:Sync() end
+                end
+                UIDropDownMenu_AddButton(info, level)
             end
-            UIDropDownMenu_AddButton(info, level)
         end
     end)
 
@@ -1557,10 +1577,16 @@ local function MSWA_CreateOptionsFrame()
         UIDropDownMenu_SetText(f.glowTypeDrop, (MSWA.GLOW_TYPES or {})[glowType] or "Pixel Glow")
 
         -- Condition dropdown text
+        local isAutoBuff2 = s2 and s2.auraMode == "AUTOBUFF"
+        -- Timer conditions only work for AUTOBUFF; reset for spell/item CDs
+        if not isAutoBuff2 and (cond == "TIMER_BELOW" or cond == "TIMER_ABOVE") then
+            cond = "ALWAYS"
+            if gs then gs.condition = "ALWAYS" end
+        end
         UIDropDownMenu_SetText(f.glowCondDrop, (MSWA.GLOW_CONDITIONS or {})[cond] or "Always")
 
-        -- Condition value visibility
-        local showValue = (cond == "TIMER_BELOW" or cond == "TIMER_ABOVE")
+        -- Condition value visibility (only for AUTOBUFF timer conditions)
+        local showValue = isAutoBuff2 and (cond == "TIMER_BELOW" or cond == "TIMER_ABOVE")
         f.glowCondValueLabel:SetShown(showValue)
         f.glowCondValueEdit:SetShown(showValue)
         if showValue then

@@ -283,26 +283,10 @@ local function MSWA_UpdateSpells()
                                 btn.icon:SetDesaturated(false)
                             end
 
-                            -- Glow/conditional state for spell cooldowns
-                            -- IsCooldownActive is taint-safe (reads frame state, not API)
+                            -- Glow/conditional: IsCooldownActive is taint-safe (frame state),
+                            -- remaining from API via pcall (may be 0 if tainted)
                             local glowOnCD = MSWA_IsCooldownActive(btn)
-                            local glowRem  = 0
-                            if glowOnCD then
-                                -- Try API (works for non-tainted spells)
-                                local apiRem = MSWA_GetSpellGlowRemaining(spellID)
-                                if apiRem > 0 then
-                                    glowRem = apiRem
-                                elseif btn.cooldown.GetCooldownTimes then
-                                    -- Fallback: cooldown frame widget stores untainted ms values
-                                    pcall(function()
-                                        local sMs, dMs = btn.cooldown:GetCooldownTimes()
-                                        if sMs and dMs and sMs > 0 and dMs > 0 then
-                                            glowRem = (sMs + dMs) / 1000 - GetTime()
-                                            if glowRem < 0 then glowRem = 0 end
-                                        end
-                                    end)
-                                end
-                            end
+                            local glowRem  = MSWA_GetSpellGlowRemaining(spellID)
 
                             -- Alpha: combat state + cooldown
                             btn:SetAlpha(ComputeAlpha(s, glowOnCD, inCombat))
@@ -411,7 +395,8 @@ local function MSWA_UpdateSpells()
                                 btn.icon:SetDesaturated(false)
                             end
 
-                            local glowRem, glowOnCD = MSWA_GetItemGlowRemaining(start, duration)
+                            local glowOnCD = MSWA_IsCooldownActive(btn)
+                            local glowRem  = MSWA_GetItemGlowRemaining(start, duration)
 
                             -- Alpha: combat state + cooldown
                             btn:SetAlpha(ComputeAlpha(s, glowOnCD, inCombat))
