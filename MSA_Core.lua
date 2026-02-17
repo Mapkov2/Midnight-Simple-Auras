@@ -68,3 +68,96 @@ MSWA._autoBuff = {}
 function MSWA_Print(msg)
     print("|cff00ff00[MSA]|r " .. msg)
 end
+
+-----------------------------------------------------------
+-- Tooltip ID Info (Spell ID / Icon ID / Item ID)
+-----------------------------------------------------------
+
+do
+    local function ResetFlags(tooltip)
+        tooltip._mswaHasSpell = false
+        tooltip._mswaHasItem  = false
+    end
+
+    local function AddSpellInfo(tooltip)
+        if tooltip._mswaHasSpell then return end
+        local db = MSWA_GetDB and MSWA_GetDB()
+        if not db then return end
+        if not db.showSpellID and not db.showIconID then return end
+
+        local ok, _, spellID = pcall(tooltip.GetSpell, tooltip)
+        if not ok or not spellID then return end
+
+        local ok2, icon = pcall(function()
+            return C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID)
+        end)
+        if not ok2 then icon = nil end
+
+        if db.showSpellID then
+            if icon then
+                tooltip:AddLine("|T" .. icon .. ":0|t Spell ID: |cffffffff" .. spellID .. "|r", 1, 0.82, 0)
+            else
+                tooltip:AddLine("Spell ID: |cffffffff" .. spellID .. "|r", 1, 0.82, 0)
+            end
+        end
+
+        if icon and db.showIconID then
+            tooltip:AddLine("|T" .. icon .. ":0|t Icon ID: |cffffffff" .. icon .. "|r", 1, 0.82, 0)
+        end
+
+        tooltip._mswaHasSpell = true
+        tooltip:Show()
+    end
+
+    local function AddItemInfo(tooltip)
+        if tooltip._mswaHasItem then return end
+        local db = MSWA_GetDB and MSWA_GetDB()
+        if not db then return end
+        if not db.showSpellID and not db.showIconID then return end
+
+        local ok, _, link = pcall(tooltip.GetItem, tooltip)
+        if not ok or not link then return end
+
+        local itemID = link:match("item:(%d+)")
+        if not itemID then return end
+
+        local ok2, icon = pcall(function() return select(10, GetItemInfo(itemID)) end)
+        if not ok2 then icon = nil end
+
+        if db.showSpellID then
+            if icon then
+                tooltip:AddLine("|T" .. icon .. ":0|t Item ID: |cffffffff" .. itemID .. "|r", 1, 0.82, 0)
+            else
+                tooltip:AddLine("Item ID: |cffffffff" .. itemID .. "|r", 1, 0.82, 0)
+            end
+        end
+
+        if icon and db.showIconID then
+            tooltip:AddLine("|T" .. icon .. ":0|t Icon ID: |cffffffff" .. icon .. "|r", 1, 0.82, 0)
+        end
+
+        tooltip._mswaHasItem = true
+        tooltip:Show()
+    end
+
+    local function OnTooltipUpdate(tooltip)
+        AddSpellInfo(tooltip)
+        AddItemInfo(tooltip)
+    end
+
+    local hookFrame = CreateFrame("Frame")
+    hookFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    hookFrame:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+
+        local function HookTooltip(tt)
+            if not tt or not tt.HookScript then return end
+            tt:HookScript("OnShow", ResetFlags)
+            tt:HookScript("OnUpdate", OnTooltipUpdate)
+            tt:HookScript("OnTooltipCleared", ResetFlags)
+        end
+
+        HookTooltip(GameTooltip)
+        HookTooltip(ItemRefTooltip)
+    end)
+end

@@ -47,9 +47,23 @@ function MSWA_GetMasqueGroup()
     return MSWA.MasqueGroup
 end
 
-function MSWA_ReskinMasque()
+-- Hot path: only reskin when icon count actually changes
+local lastMasqueIconCount = -1
+
+function MSWA_ReskinMasque(activeCount)
     local group = MSWA_GetMasqueGroup()
-    if group and group.ReSkin then group:ReSkin() end
+    if not group or not group.ReSkin then return end
+    -- Only reskin on structural change (icon count change) or explicit force
+    if activeCount == nil then
+        -- Forced reskin (skin change, options, mousewheel resize)
+        lastMasqueIconCount = -1
+        group:ReSkin()
+        return
+    end
+    if activeCount ~= lastMasqueIconCount then
+        lastMasqueIconCount = activeCount
+        group:ReSkin()
+    end
 end
 
 function MSWA_FixCheckHitRect(btn)
@@ -213,7 +227,8 @@ function MSWA_GetStackStyleForKey(key)
 end
 
 function MSWA_ApplyStackStyleToButton(btn, key)
-    if not btn or not btn.stackText then return end
+    local target = btn and btn.stackText
+    if not target then return end
 
     local db = MSWA_GetDB()
     local s = (key ~= nil) and select(1, MSWA_GetSpellSettings(db, key)) or nil
@@ -221,16 +236,16 @@ function MSWA_ApplyStackStyleToButton(btn, key)
     local path = MSWA_GetFontPathFromKey(fontKey)
     local size, r, g, b, point, ox, oy = MSWA_GetStackStyleForKey(key)
 
-    if path and btn.stackText.SetFont then
-        btn.stackText:SetFont(path, size, "OUTLINE")
+    if path and target.SetFont then
+        target:SetFont(path, size, "OUTLINE")
     end
-    if btn.stackText.SetTextColor then
-        btn.stackText:SetTextColor(r, g, b, 1)
+    if target.SetTextColor then
+        target:SetTextColor(r, g, b, 1)
     end
-    if btn.stackText.ClearAllPoints and btn.stackText.SetPoint then
-        btn.stackText:ClearAllPoints()
+    if target.ClearAllPoints and target.SetPoint then
+        target:ClearAllPoints()
         local baseOff = MSWA_TEXT_POINT_OFFSETS[point] or MSWA_TEXT_POINT_OFFSETS.BOTTOMRIGHT
-        btn.stackText:SetPoint(point or "BOTTOMRIGHT", btn, point or "BOTTOMRIGHT", (baseOff[1] or -1) + ox, (baseOff[2] or 1) + oy)
+        target:SetPoint(point or "BOTTOMRIGHT", btn, point or "BOTTOMRIGHT", (baseOff[1] or -1) + ox, (baseOff[2] or 1) + oy)
     end
 end
 

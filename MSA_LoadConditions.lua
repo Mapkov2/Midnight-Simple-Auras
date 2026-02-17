@@ -2,8 +2,9 @@
 -- MSA_LoadConditions.lua
 -- Centralized load-condition evaluation + class/spec data
 --
--- Single source of truth: MSWA_ShouldLoadAura(settings)
--- Used by UpdateEngine (hot path) AND Options list filtering.
+-- v3: ShouldLoadAura accepts (s, inCombat, inEncounter) to
+--     avoid calling InCombatLockdown/IsEncounterInProgress
+--     per icon. Caller caches once per update frame.
 -- ########################################################
 
 local type, tostring, tonumber = type, tostring, tonumber
@@ -13,14 +14,12 @@ local pcall = pcall
 -- Player identity cache  (computed once, never changes)
 -----------------------------------------------------------
 
-local playerName       -- "Charname"
-local playerRealm      -- "Realmname" (no spaces)
-local playerFullName   -- "Charname-Realmname" (canonical, lowercased)
-local playerClassToken -- "ROGUE", "WARRIOR", etc.
-local playerSpecIndex  -- 1-4  (0 or nil = unknown)
+local playerName
+local playerRealm
+local playerFullName
+local playerClassToken
+local playerSpecIndex
 
--- Rebuild identity.  Called once on PLAYER_LOGIN and on
--- ACTIVE_TALENT_GROUP_CHANGED / PLAYER_SPECIALIZATION_CHANGED.
 function MSWA_RefreshPlayerIdentity()
     playerName  = UnitName("player") or ""
     playerRealm = ""
@@ -37,11 +36,9 @@ function MSWA_RefreshPlayerIdentity()
         playerFullName = playerName:lower()
     end
 
-    -- Class (never changes, but grab it here for one-stop init)
     local _, classToken = UnitClass("player")
     playerClassToken = classToken or "UNKNOWN"
 
-    -- Spec
     if GetSpecialization then
         playerSpecIndex = GetSpecialization() or 0
     else
@@ -49,7 +46,6 @@ function MSWA_RefreshPlayerIdentity()
     end
 end
 
--- Accessors
 function MSWA_GetPlayerFullName()   return playerFullName   end
 function MSWA_GetPlayerRealm()      return playerRealm      end
 function MSWA_GetPlayerName()       return playerName        end
@@ -57,11 +53,10 @@ function MSWA_GetPlayerClassToken() return playerClassToken  end
 function MSWA_GetPlayerSpecIndex()  return playerSpecIndex   end
 
 -----------------------------------------------------------
--- Class data  (fileToken → display info)
+-- Class / Spec data (unchanged)
 -----------------------------------------------------------
 
 MSWA_CLASS_LIST = {
-    -- order matches WoW class IDs for consistency
     { token = "WARRIOR",      name = "Warrior",       color = "C69B6D" },
     { token = "PALADIN",      name = "Paladin",       color = "F48CBA" },
     { token = "HUNTER",       name = "Hunter",        color = "AAD372" },
@@ -77,16 +72,10 @@ MSWA_CLASS_LIST = {
     { token = "EVOKER",       name = "Evoker",        color = "33937F" },
 }
 
--- Lookup table:  token → { name, color }
 MSWA_CLASS_INFO = {}
 for _, c in ipairs(MSWA_CLASS_LIST) do
     MSWA_CLASS_INFO[c.token] = c
 end
-
------------------------------------------------------------
--- Spec data  (fileToken → ordered list of spec names)
--- Indices match GetSpecialization() return values (1-based).
------------------------------------------------------------
 
 MSWA_SPEC_DATA = {
     WARRIOR     = { "Arms",          "Fury",          "Protection"   },
@@ -104,10 +93,6 @@ MSWA_SPEC_DATA = {
     EVOKER      = { "Devastation",   "Preservation",  "Augmentation" },
 }
 
------------------------------------------------------------
--- Helper: get spec name for a class + specIndex
------------------------------------------------------------
-
 function MSWA_GetSpecName(classToken, specIdx)
     local specs = classToken and MSWA_SPEC_DATA[classToken]
     if specs and specIdx and specIdx >= 1 and specIdx <= #specs then
@@ -117,18 +102,13 @@ function MSWA_GetSpecName(classToken, specIdx)
 end
 
 -----------------------------------------------------------
--- Normalize a character name for comparison.
---   "Mapko"  →  "mapko-realm"   (auto-append current realm)
---   "Mapko-Antonidas" →  "mapko-antonidas"
---   nil / "" → nil  (means "any")
+-- NormalizeCharName (local, called rarely)
 -----------------------------------------------------------
 
 local function NormalizeCharName(raw)
     if type(raw) ~= "string" then return nil end
     local s = raw:gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s", "")
     if s == "" then return nil end
-
-    -- Auto-append current realm if no dash present
     if not s:find("%-") then
         if playerRealm and playerRealm ~= "" then
             s = s .. "-" .. playerRealm
@@ -138,15 +118,13 @@ local function NormalizeCharName(raw)
 end
 
 -----------------------------------------------------------
--- MSWA_ShouldLoadAura(settings)
+-- MSWA_ShouldLoadAura(settings, inCombat, inEncounter)
 --
--- Returns true if the aura should be shown right now.
--- `settings` is the per-aura spellSettings table (may be nil).
---
--- This is the ONE function both engine and UI call.
+-- inCombat / inEncounter: OPTIONAL. If nil, calls API.
+-- Hot path should pass cached values to avoid per-icon API calls.
 -----------------------------------------------------------
 
-function MSWA_ShouldLoadAura(s)
+function MSWA_ShouldLoadAura(s, inCombat, inEncounter)
     if not s then return true end
 
     -- Never
@@ -154,7 +132,7 @@ function MSWA_ShouldLoadAura(s)
         return false
     end
 
-    -- Character filter (Name-Realm)
+    -- Character filter
     local wantChar = s.loadCharName or s.loadChar
     if wantChar and wantChar ~= "" then
         if not playerFullName then MSWA_RefreshPlayerIdentity() end
@@ -185,25 +163,25 @@ function MSWA_ShouldLoadAura(s)
         end
     end
 
-    -- Combat filter
-    local inCombat = InCombatLockdown and InCombatLockdown() and true or false
-
+    -- Combat filter (use cached value if provided)
+    if inCombat == nil then
+        inCombat = InCombatLockdown and InCombatLockdown() and true or false
+    end
     local cm = s.loadCombatMode
     if cm == "IN" then
         if not inCombat then return false end
     elseif cm == "OUT" then
         if inCombat then return false end
     end
-
-    -- Legacy loadMode fallback
     if not cm then
         if s.loadMode == "IN_COMBAT" and not inCombat then return false end
         if s.loadMode == "OUT_OF_COMBAT" and inCombat then return false end
     end
 
-    -- Encounter filter
-    local inEncounter = IsEncounterInProgress and IsEncounterInProgress() and true or false
-
+    -- Encounter filter (use cached value if provided)
+    if inEncounter == nil then
+        inEncounter = IsEncounterInProgress and IsEncounterInProgress() and true or false
+    end
     local em = s.loadEncounterMode
     if em == "IN" then
         if not inEncounter then return false end
@@ -222,23 +200,18 @@ local identityFrame = CreateFrame("Frame")
 identityFrame:RegisterEvent("PLAYER_LOGIN")
 identityFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
--- Spec change events (name varies by expansion)
 if identityFrame.RegisterEvent then
     pcall(identityFrame.RegisterEvent, identityFrame, "ACTIVE_TALENT_GROUP_CHANGED")
     pcall(identityFrame.RegisterEvent, identityFrame, "PLAYER_SPECIALIZATION_CHANGED")
     pcall(identityFrame.RegisterEvent, identityFrame, "PLAYER_TALENT_UPDATE")
 end
 
-identityFrame:SetScript("OnEvent", function(self, event, ...)
+identityFrame:SetScript("OnEvent", function(self, event)
     MSWA_RefreshPlayerIdentity()
-
-    -- Spec/talent change → re-evaluate load conditions
     if event == "ACTIVE_TALENT_GROUP_CHANGED"
     or event == "PLAYER_SPECIALIZATION_CHANGED"
     or event == "PLAYER_TALENT_UPDATE" then
-        if MSWA_RequestUpdateSpells then
-            MSWA_RequestUpdateSpells()
-        end
+        if MSWA_RequestUpdateSpells then MSWA_RequestUpdateSpells() end
         if MSWA_RefreshOptionsList and MSWA and MSWA.optionsFrame
            and MSWA.optionsFrame:IsShown() then
             MSWA_RefreshOptionsList()

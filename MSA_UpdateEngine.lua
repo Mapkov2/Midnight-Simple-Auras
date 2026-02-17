@@ -1,45 +1,19 @@
 -- ########################################################
--- MSA_UpdateEngine.lua  (v2 Ã¢â‚¬â€œ perf + item autobuff)
+-- MSA_UpdateEngine.lua  (v4 – zero waste)
 --
--- Changes vs original:
---   Ã¢â‚¬Â¢ 10 Hz throttle (coalesce rapid events)
---   Ã¢â‚¬Â¢ ShouldLoad Ã¢â€ â€™ delegates to MSWA_ShouldLoadAura
---   Ã¢â‚¬Â¢ PositionButton moved outside UpdateSpells (no closure alloc)
---   Ã¢â‚¬Â¢ Item section: AUTOBUFF mode added (mirrors spell AUTOBUFF)
---   Ã¢â‚¬Â¢ Item CD trigger via BAG_UPDATE_COOLDOWN
---   Ã¢â‚¬Â¢ Lightweight autobuff tick (no full rebuild per frame)
+-- Perf fixes vs v3:
+--   • Combat/encounter state cached once, not per icon
+--   • Icon texture cached per button (skip GetSpellInfo)
+--   • Masque ReSkin ONLY when icon count changes
+--   • Event registration ONLY when icon count changes
+--   • Glow settings passed directly (zero DB lookup)
+--   • MSWA_GetDB() returns cached table (no migration checks)
 -- ########################################################
 
-local pairs, type, pcall, tostring, tonumber = pairs, type, pcall, tostring, tonumber
+local pairs, type, pcall, tonumber, tostring = pairs, type, pcall, tonumber, tostring
 local GetTime         = GetTime
 local GetItemCooldown = GetItemCooldown
 local GetItemIcon     = GetItemIcon
-
--- Local upvalues for hot path
-local MSWA_GetDB                = MSWA_GetDB
-local MSWA_GetAuraGroup         = MSWA_GetAuraGroup
-local MSWA_GetAnchorFrame       = MSWA_GetAnchorFrame
-local MSWA_GetIconForKey         = MSWA_GetIconForKey
-local MSWA_IsSpellInstanceKey    = MSWA_IsSpellInstanceKey
-local MSWA_KeyToSpellID          = MSWA_KeyToSpellID
-local MSWA_IsItemKey             = MSWA_IsItemKey
-local MSWA_KeyToItemID           = MSWA_KeyToItemID
-local MSWA_GetSpellCooldown      = MSWA_GetSpellCooldown
-local MSWA_ApplyCooldownFrame    = MSWA_ApplyCooldownFrame
-local MSWA_ClearCooldownFrame    = MSWA_ClearCooldownFrame
-local MSWA_ClearCooldown         = MSWA_ClearCooldown
-local MSWA_UpdateBuffVisual      = MSWA_UpdateBuffVisual
-local MSWA_ApplyTextStyleToButton = MSWA_ApplyTextStyleToButton
-local MSWA_ApplyStackStyleToButton = MSWA_ApplyStackStyleToButton
-local MSWA_ApplyGrayscaleOnCooldownToButton = MSWA_ApplyGrayscaleOnCooldownToButton
-local MSWA_ReskinMasque          = MSWA_ReskinMasque
-local MSWA_TryComputeExpirationFromRemaining = MSWA_TryComputeExpirationFromRemaining
-local MSWA_UpdateGlow            = MSWA_UpdateGlow
-local MSWA_StopGlow              = MSWA_StopGlow
-local MSWA_ApplyConditionalTextColor = MSWA_ApplyConditionalTextColor
-local MSWA_ApplySwipeDarken         = MSWA_ApplySwipeDarken
-local MSWA_TryComputeGlowRemaining  = MSWA_TryComputeGlowRemaining
-local MSWA_TryComputeItemGlowRemaining = MSWA_TryComputeItemGlowRemaining
 
 -----------------------------------------------------------
 -- Constants
@@ -58,12 +32,13 @@ local dirty          = false
 local autoBuffActive = false
 local lastFullUpdate = 0
 local forceImmediate = false
+local lastActiveCount = 0
 
 -----------------------------------------------------------
--- Forward-declared event registration
+-- Forward-declared
 -----------------------------------------------------------
 
-local MSWA_UpdateEventRegistration -- assigned below
+local MSWA_UpdateEventRegistration
 
 -----------------------------------------------------------
 -- Icon state cache
@@ -78,15 +53,22 @@ local function WipeIconCache()
 end
 
 -----------------------------------------------------------
--- ShouldLoad Ã¢â€ â€™ centralized MSWA_ShouldLoadAura
+-- Item key cache (avoid string.format in hot loop)
 -----------------------------------------------------------
 
-local function ShouldLoad(s)
-    return MSWA_ShouldLoadAura(s)
+local itemKeyCache = {}
+
+local function GetItemKey(itemID)
+    local k = itemKeyCache[itemID]
+    if not k then
+        k = ("item:%d"):format(itemID)
+        itemKeyCache[itemID] = k
+    end
+    return k
 end
 
 -----------------------------------------------------------
--- PositionButton  (top-level, zero closure allocation)
+-- PositionButton (top-level, zero closure allocation)
 -----------------------------------------------------------
 
 local function PositionButton(btn, s, key, idx, frame, ICON_SIZE, ICON_SPACE, db)
@@ -95,13 +77,9 @@ local function PositionButton(btn, s, key, idx, frame, ICON_SIZE, ICON_SPACE, db
     if group then
         local gx = group.x or 0
         local gy = group.y or 0
-        local lx = (s and s.x or 0) + gx
-        local ly = (s and s.y or 0) + gy
-        btn:SetPoint("CENTER", frame, "CENTER", lx, ly)
+        btn:SetPoint("CENTER", frame, "CENTER", (s and s.x or 0) + gx, (s and s.y or 0) + gy)
         local size = group.size or ICON_SIZE
-        local w = (s and s.width) or size
-        local h = (s and s.height) or w
-        btn:SetSize(w, h)
+        btn:SetSize((s and s.width) or size, (s and s.height) or size)
     else
         local anchorFrame = MSWA_GetAnchorFrame(s or {})
         local lx = s and s.x or 0
@@ -111,8 +89,7 @@ local function PositionButton(btn, s, key, idx, frame, ICON_SIZE, ICON_SPACE, db
         elseif s and s.x and s.y then
             btn:SetPoint("CENTER", frame, "CENTER", lx, ly)
         else
-            local offsetX = (idx - 1) * (ICON_SIZE + ICON_SPACE)
-            btn:SetPoint("LEFT", frame, "LEFT", offsetX, 0)
+            btn:SetPoint("LEFT", frame, "LEFT", (idx - 1) * (ICON_SIZE + ICON_SPACE), 0)
         end
         if s and s.width and s.height then
             btn:SetSize(s.width, s.height)
@@ -120,6 +97,34 @@ local function PositionButton(btn, s, key, idx, frame, ICON_SIZE, ICON_SPACE, db
             btn:SetSize(ICON_SIZE, ICON_SIZE)
         end
     end
+end
+
+-----------------------------------------------------------
+-- Inline helpers
+-----------------------------------------------------------
+
+local function ClearStackAndCount(btn)
+    if btn.count then btn.count:SetText(""); btn.count:Hide() end
+    if btn.stackText then btn.stackText:SetText(""); btn.stackText:Hide() end
+end
+
+local function HideButton(btn)
+    btn:Hide()
+    btn.icon:SetTexture(nil)
+    btn._msaCachedKey = nil
+    MSWA_ClearCooldownFrame(btn.cooldown)
+    MSWA_StopGlow(btn)
+    btn.spellID = nil
+end
+
+-----------------------------------------------------------
+-- SetIconTexture with cache (skip GetSpellInfo if same key)
+-----------------------------------------------------------
+
+local function SetIconTexture(btn, key)
+    if btn._msaCachedKey == key then return end
+    btn._msaCachedKey = key
+    btn.icon:SetTexture(MSWA_GetIconForKey(key))
 end
 
 -----------------------------------------------------------
@@ -138,281 +143,297 @@ local function MSWA_UpdateSpells()
     local MAX_ICONS     = MSWA.MAX_ICONS
     local previewMode   = MSWA.previewMode
     local autoBuff      = MSWA._autoBuff
+    local icons         = MSWA.icons
+
+    -- Cache API availability once
+    local hasGetCD          = C_Spell and C_Spell.GetSpellCooldown
+    local hasGetCDRemaining = C_Spell and C_Spell.GetSpellCooldownRemaining
+
+    -- Cache combat/encounter state ONCE (not per icon!)
+    local inCombat    = InCombatLockdown and InCombatLockdown() and true or false
+    local inEncounter = IsEncounterInProgress and IsEncounterInProgress() and true or false
 
     -----------------------------------------------------------
-    -- 1) Spells  (logic preserved 1:1 from original)
+    -- 1) Spells
     -----------------------------------------------------------
-    if C_Spell and C_Spell.GetSpellCooldown then
+    if hasGetCD then
         for trackedKey, enabled in pairs(tracked) do
-            local spellID
-            if type(trackedKey) == "number" then
-                spellID = trackedKey
-            elseif MSWA_IsSpellInstanceKey(trackedKey) then
-                spellID = MSWA_KeyToSpellID(trackedKey)
-            end
-            if enabled and spellID and index <= MAX_ICONS then
-                local btn  = MSWA.icons[index]
-                local key  = trackedKey
-                local icon = MSWA_GetIconForKey(key)
-
-                btn.icon:SetTexture(icon)
-                btn:Show()
-                btn.spellID = key
-                MSWA_ApplyTextStyleToButton(btn, key)
-                if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
-
-                btn:ClearAllPoints()
-                local s = settingsTable[key] or settingsTable[tostring(key)]
-                local previewOnly = not ShouldLoad(s)
-                if previewOnly and not previewMode then
-                    -- skip slot
-
-                elseif s and s.auraMode == "AUTOBUFF" then
-                    -- ========== SPELL AUTO BUFF MODE ==========
-                    local ab = autoBuff[key]
-                    local buffDur = tonumber(s.autoBuffDuration) or 10
-                    if buffDur < 0.1 then buffDur = 0.1 end
-
-                    local showBuff = false
-                    if ab and ab.active then
-                        local now = GetTime()
-                        if (now - ab.startTime) < buffDur then
-                            showBuff = true
-                        else
-                            ab.active = false
-                        end
-                    end
-
-                    if showBuff then
-                        btn.icon:SetTexture(icon)
-                        btn:Show()
-                        btn.spellID = key
-                        MSWA_ApplyTextStyleToButton(btn, key)
-                        if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
-                        PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
-                        MSWA_ApplyCooldownFrame(btn.cooldown, ab.startTime, buffDur, 1)
-                        btn.icon:SetDesaturated(previewOnly)
-                        btn:SetAlpha(previewOnly and 0.5 or 1.0)
-                        if btn.count then btn.count:SetText(""); btn.count:Hide() end
-                        if btn.stackText then btn.stackText:SetText(""); btn.stackText:Hide() end
-                        btn._msaGlowRemaining = buffDur - (GetTime() - ab.startTime)
-                        if btn._msaGlowRemaining < 0 then btn._msaGlowRemaining = 0 end
-                        btn._msaGlowOnCD = btn._msaGlowRemaining > 0
-                        index = index + 1
-                    elseif previewMode then
-                        btn.icon:SetTexture(icon)
-                        btn:Show()
-                        btn.spellID = key
-                        MSWA_ApplyTextStyleToButton(btn, key)
-                        if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
-                        PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
-                        MSWA_ClearCooldownFrame(btn.cooldown)
-                        btn.icon:SetDesaturated(true)
-                        btn:SetAlpha(0.5)
-                        if btn.count then btn.count:SetText(""); btn.count:Hide() end
-                        if btn.stackText then btn.stackText:SetText(""); btn.stackText:Hide() end
-                        btn._msaGlowRemaining = 0
-                        btn._msaGlowOnCD = false
-                        index = index + 1
-                    else
-                        btn:Hide()
-                        btn.icon:SetTexture(nil)
-                        MSWA_ClearCooldownFrame(btn.cooldown)
-                        MSWA_StopGlow(btn)
-                        btn.spellID = nil
-                    end
-
-                else
-                    -- ========== NORMAL SPELL MODE ==========
-                    PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
-
-                    local cdInfo = MSWA_GetSpellCooldown(spellID)
-                    if cdInfo then
-                        local exp = cdInfo.expirationTime
-                        if C_Spell and C_Spell.GetSpellCooldownRemaining then
-                            local remaining = C_Spell.GetSpellCooldownRemaining(spellID)
-                            local exp2 = MSWA_TryComputeExpirationFromRemaining(remaining)
-                            if exp2 ~= nil then exp = exp2 end
-                        end
-                        MSWA_ApplyCooldownFrame(btn.cooldown, cdInfo.startTime, cdInfo.duration, cdInfo.modRate, exp)
-                    else
-                        MSWA_ClearCooldown(btn)
-                    end
-
-                    MSWA_UpdateBuffVisual(btn, key)
-                    MSWA_ApplyGrayscaleOnCooldownToButton(btn, key)
-
-                    -- Store glow data for end-of-loop glow pass (secret-safe)
-                    local gr, onCD = MSWA_TryComputeGlowRemaining(cdInfo)
-                    btn._msaGlowRemaining = gr
-                    btn._msaGlowOnCD = onCD
-
-                    if previewOnly then
-                        btn.icon:SetDesaturated(true)
-                        btn:SetAlpha(0.5)
-                    else
-                        btn:SetAlpha(1.0)
-                    end
-
-                    index = index + 1
+            if index > MAX_ICONS then break end
+            if enabled then
+                local spellID
+                if type(trackedKey) == "number" then
+                    spellID = trackedKey
+                elseif MSWA_IsSpellInstanceKey(trackedKey) then
+                    spellID = MSWA_KeyToSpellID(trackedKey)
                 end
-            end
+
+                if spellID then
+                    local key = trackedKey
+                    local s   = settingsTable[key] or settingsTable[tostring(key)]
+                    local shouldLoad = MSWA_ShouldLoadAura(s, inCombat, inEncounter)
+
+                    if shouldLoad or previewMode then
+                        local btn = icons[index]
+
+                        SetIconTexture(btn, key)
+                        btn:Show()
+                        btn.spellID = key
+                        btn:ClearAllPoints()
+
+                        MSWA_ApplyTextStyle(btn, db, s)
+                        MSWA_ApplyStackStyle(btn, s)
+
+                        if s and s.auraMode == "AUTOBUFF" then
+                            -- ========== SPELL AUTO BUFF MODE ==========
+                            local ab = autoBuff[key]
+                            local buffDur = tonumber(s.autoBuffDuration) or 10
+                            if buffDur < 0.1 then buffDur = 0.1 end
+
+                            local showBuff = false
+                            if ab and ab.active then
+                                local elapsed = GetTime() - ab.startTime
+                                if elapsed < buffDur then
+                                    showBuff = true
+                                else
+                                    ab.active = false
+                                end
+                            end
+
+                            if showBuff then
+                                PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
+                                MSWA_ApplyCooldownFrame(btn.cooldown, ab.startTime, buffDur, 1)
+                                btn.icon:SetDesaturated(not shouldLoad)
+                                btn:SetAlpha(shouldLoad and 1.0 or 0.5)
+                                ClearStackAndCount(btn)
+
+                                local glowRem = buffDur - (GetTime() - ab.startTime)
+                                if glowRem < 0 then glowRem = 0 end
+                                local gs = s and s.glow
+                                if gs and gs.enabled then
+                                    MSWA_UpdateGlow_Fast(btn, gs, glowRem, glowRem > 0)
+                                elseif btn._msaGlowActive then
+                                    MSWA_StopGlow(btn)
+                                end
+                                MSWA_ApplyConditionalTextColor_Fast(btn, s, db, glowRem, glowRem > 0)
+                                MSWA_ApplySwipeDarken_Fast(btn, s)
+                                index = index + 1
+
+                            elseif previewMode then
+                                PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
+                                MSWA_ClearCooldownFrame(btn.cooldown)
+                                btn.icon:SetDesaturated(true)
+                                btn:SetAlpha(0.5)
+                                ClearStackAndCount(btn)
+                                MSWA_StopGlow(btn)
+                                index = index + 1
+                            else
+                                HideButton(btn)
+                            end
+
+                        else
+                            -- ========== NORMAL SPELL MODE ==========
+                            PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
+
+                            local cdInfo = C_Spell.GetSpellCooldown(spellID)
+                            if cdInfo then
+                                local exp = cdInfo.expirationTime
+                                if hasGetCDRemaining then
+                                    local rem = C_Spell.GetSpellCooldownRemaining(spellID)
+                                    if type(rem) == "number" then
+                                        exp = GetTime() + rem
+                                    end
+                                end
+                                MSWA_ApplyCooldownFrame(btn.cooldown, cdInfo.startTime, cdInfo.duration, cdInfo.modRate, exp)
+                            else
+                                MSWA_ClearCooldownFrame(btn.cooldown)
+                            end
+
+                            MSWA_UpdateBuffVisual_Fast(btn, s, spellID, false, nil)
+
+                            -- Grayscale
+                            if s and s.grayOnCooldown then
+                                btn.icon:SetDesaturated(MSWA_IsCooldownActive(btn))
+                            else
+                                btn.icon:SetDesaturated(false)
+                            end
+
+                            -- Glow remaining (zero pcall)
+                            local glowRem, glowOnCD = MSWA_GetSpellGlowRemaining(spellID)
+
+                            -- Preview overlay
+                            if not shouldLoad then
+                                btn.icon:SetDesaturated(true)
+                                btn:SetAlpha(0.5)
+                            else
+                                btn:SetAlpha(1.0)
+                            end
+
+                            -- Glow (pass settings directly, zero DB lookup)
+                            local gs = s and s.glow
+                            if gs and gs.enabled then
+                                MSWA_UpdateGlow_Fast(btn, gs, glowRem, glowOnCD)
+                            elseif btn._msaGlowActive then
+                                MSWA_StopGlow(btn)
+                            end
+                            MSWA_ApplyConditionalTextColor_Fast(btn, s, db, glowRem, glowOnCD)
+                            MSWA_ApplySwipeDarken_Fast(btn, s)
+
+                            index = index + 1
+                        end
+                    end -- shouldLoad or previewMode
+                end -- spellID
+            end -- enabled
         end
     end
 
     -----------------------------------------------------------
-    -- 2) Items  (original normal mode + new AUTOBUFF mode)
+    -- 2) Items
     -----------------------------------------------------------
-    for itemID, enabled in pairs(trackedItems) do
-        if enabled and index <= MAX_ICONS then
-            if GetItemCooldown and GetItemIcon then
-                local key = ("item:%d"):format(itemID)
+    if GetItemCooldown and GetItemIcon then
+        for itemID, enabled in pairs(trackedItems) do
+            if index > MAX_ICONS then break end
+            if enabled then
+                local key = GetItemKey(itemID)
                 local tex = MSWA_GetIconForKey(key)
                 if tex then
-                    local btn = MSWA.icons[index]
-                    local s   = settingsTable[key] or settingsTable[tostring(key)]
-                    local previewOnly = not ShouldLoad(s)
+                    local s = settingsTable[key] or settingsTable[tostring(key)]
+                    local shouldLoad = MSWA_ShouldLoadAura(s, inCombat, inEncounter)
 
-                    if previewOnly and not previewMode then
-                        -- skip
+                    if shouldLoad or previewMode then
+                        local btn = icons[index]
 
-                    elseif s and s.auraMode == "AUTOBUFF" then
-                        -- ========== ITEM AUTO BUFF MODE (new) ==========
-                        local ab = autoBuff[key]
-                        local buffDur = tonumber(s.autoBuffDuration) or 10
-                        if buffDur < 0.1 then buffDur = 0.1 end
-
-                        local showBuff = false
-                        if ab and ab.active then
-                            local now = GetTime()
-                            if (now - ab.startTime) < buffDur then
-                                showBuff = true
-                            else
-                                ab.active = false
-                            end
-                        end
-
-                        if showBuff then
-                            btn.icon:SetTexture(tex)
-                            btn:Show()
-                            btn.spellID = key
-                            MSWA_ApplyTextStyleToButton(btn, key)
-                            if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
-                            btn:ClearAllPoints()
-                            PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
-                            MSWA_ApplyCooldownFrame(btn.cooldown, ab.startTime, buffDur, 1)
-                            btn.icon:SetDesaturated(previewOnly)
-                            btn:SetAlpha(previewOnly and 0.5 or 1.0)
-                            if btn.count then btn.count:SetText(""); btn.count:Hide() end
-                            if btn.stackText then btn.stackText:SetText(""); btn.stackText:Hide() end
-                            btn._msaGlowRemaining = buffDur - (GetTime() - ab.startTime)
-                            if btn._msaGlowRemaining < 0 then btn._msaGlowRemaining = 0 end
-                            btn._msaGlowOnCD = btn._msaGlowRemaining > 0
-                            index = index + 1
-                        elseif previewMode then
-                            btn.icon:SetTexture(tex)
-                            btn:Show()
-                            btn.spellID = key
-                            MSWA_ApplyTextStyleToButton(btn, key)
-                            if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
-                            btn:ClearAllPoints()
-                            PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
-                            MSWA_ClearCooldownFrame(btn.cooldown)
-                            btn.icon:SetDesaturated(true)
-                            btn:SetAlpha(0.5)
-                            if btn.count then btn.count:SetText(""); btn.count:Hide() end
-                            if btn.stackText then btn.stackText:SetText(""); btn.stackText:Hide() end
-                            btn._msaGlowRemaining = 0
-                            btn._msaGlowOnCD = false
-                            index = index + 1
-                        else
-                            btn:Hide()
-                            btn.icon:SetTexture(nil)
-                            MSWA_ClearCooldownFrame(btn.cooldown)
-                            MSWA_StopGlow(btn)
-                            btn.spellID = nil
-                        end
-
-                    else
-                        -- ========== NORMAL ITEM MODE (original) ==========
-                        btn.icon:SetTexture(tex)
+                        SetIconTexture(btn, key)
                         btn:Show()
                         btn.spellID = key
-                        MSWA_ApplyTextStyleToButton(btn, key)
-                        if MSWA_ApplyStackStyleToButton then MSWA_ApplyStackStyleToButton(btn, key) end
-
                         btn:ClearAllPoints()
-                        PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
 
-                        local start, duration, enable, modRate = GetItemCooldown(itemID)
-                        MSWA_ApplyCooldownFrame(btn.cooldown, start, duration, modRate)
-                        MSWA_UpdateBuffVisual(btn, key)
-                        MSWA_ApplyGrayscaleOnCooldownToButton(btn, key)
+                        MSWA_ApplyTextStyle(btn, db, s)
+                        MSWA_ApplyStackStyle(btn, s)
 
-                        -- Store glow data for end-of-loop glow pass (secret-safe)
-                        local gr, onCD = MSWA_TryComputeItemGlowRemaining(start, duration)
-                        btn._msaGlowRemaining = gr
-                        btn._msaGlowOnCD = onCD
+                        if s and s.auraMode == "AUTOBUFF" then
+                            -- ========== ITEM AUTO BUFF MODE ==========
+                            local ab = autoBuff[key]
+                            local buffDur = tonumber(s and s.autoBuffDuration) or 10
+                            if buffDur < 0.1 then buffDur = 0.1 end
 
-                        if previewOnly then
-                            btn.icon:SetDesaturated(true)
-                            btn:SetAlpha(0.5)
+                            local showBuff = false
+                            if ab and ab.active then
+                                local elapsed = GetTime() - ab.startTime
+                                if elapsed < buffDur then
+                                    showBuff = true
+                                else
+                                    ab.active = false
+                                end
+                            end
+
+                            if showBuff then
+                                PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
+                                MSWA_ApplyCooldownFrame(btn.cooldown, ab.startTime, buffDur, 1)
+                                btn.icon:SetDesaturated(not shouldLoad)
+                                btn:SetAlpha(shouldLoad and 1.0 or 0.5)
+                                ClearStackAndCount(btn)
+
+                                local glowRem = buffDur - (GetTime() - ab.startTime)
+                                if glowRem < 0 then glowRem = 0 end
+                                local gs = s and s.glow
+                                if gs and gs.enabled then
+                                    MSWA_UpdateGlow_Fast(btn, gs, glowRem, glowRem > 0)
+                                elseif btn._msaGlowActive then
+                                    MSWA_StopGlow(btn)
+                                end
+                                MSWA_ApplyConditionalTextColor_Fast(btn, s, db, glowRem, glowRem > 0)
+                                MSWA_ApplySwipeDarken_Fast(btn, s)
+                                index = index + 1
+
+                            elseif previewMode then
+                                PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
+                                MSWA_ClearCooldownFrame(btn.cooldown)
+                                btn.icon:SetDesaturated(true)
+                                btn:SetAlpha(0.5)
+                                ClearStackAndCount(btn)
+                                MSWA_StopGlow(btn)
+                                index = index + 1
+                            else
+                                HideButton(btn)
+                            end
+
                         else
-                            btn:SetAlpha(1.0)
+                            -- ========== NORMAL ITEM MODE ==========
+                            PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
+
+                            local start, duration, enable, modRate = GetItemCooldown(itemID)
+                            MSWA_ApplyCooldownFrame(btn.cooldown, start, duration, modRate)
+
+                            MSWA_UpdateBuffVisual_Fast(btn, s, nil, true, itemID)
+
+                            if s and s.grayOnCooldown then
+                                btn.icon:SetDesaturated(MSWA_IsCooldownActive(btn))
+                            else
+                                btn.icon:SetDesaturated(false)
+                            end
+
+                            local glowRem, glowOnCD = MSWA_GetItemGlowRemaining(start, duration)
+
+                            if not shouldLoad then
+                                btn.icon:SetDesaturated(true)
+                                btn:SetAlpha(0.5)
+                            else
+                                btn:SetAlpha(1.0)
+                            end
+
+                            local gs = s and s.glow
+                            if gs and gs.enabled then
+                                MSWA_UpdateGlow_Fast(btn, gs, glowRem, glowOnCD)
+                            elseif btn._msaGlowActive then
+                                MSWA_StopGlow(btn)
+                            end
+                            MSWA_ApplyConditionalTextColor_Fast(btn, s, db, glowRem, glowOnCD)
+                            MSWA_ApplySwipeDarken_Fast(btn, s)
+
+                            index = index + 1
                         end
-
-                        index = index + 1
-                    end
-                end
-            end
+                    end -- shouldLoad or previewMode
+                end -- tex
+            end -- enabled
         end
     end
 
     -----------------------------------------------------------
-    -- 3) Glow pass: apply/remove glow on all visible buttons
-    --    + conditional text color
+    -- 3) Hide remaining buttons
     -----------------------------------------------------------
-    for i = 1, index - 1 do
-        local btn = MSWA.icons[i]
-        if btn and btn:IsShown() and btn.spellID then
-            local rem = btn._msaGlowRemaining or 0
-            local onCD = btn._msaGlowOnCD or false
-            MSWA_UpdateGlow(btn, btn.spellID, rem, onCD)
-            MSWA_ApplyConditionalTextColor(btn, btn.spellID, rem, onCD)
-            MSWA_ApplySwipeDarken(btn, btn.spellID)
-        end
-    end
-
-    -----------------------------------------------------------
-    -- 4) Hide remaining buttons
-    -----------------------------------------------------------
+    local activeCount = index - 1
     for i = index, MAX_ICONS do
-        local btn = MSWA.icons[i]
-        btn:Hide()
-        btn.icon:SetTexture(nil)
-        MSWA_ClearCooldown(btn)
-        MSWA_StopGlow(btn)
-        btn.spellID = nil
-        if btn.count then btn.count:SetText(""); btn.count:Hide() end
-        if btn.stackText then btn.stackText:SetText(""); btn.stackText:Hide() end
-    end
-
-    MSWA.activeIconCount = index - 1
-    MSWA_ReskinMasque()
-
-    if MSWA_UpdateEventRegistration then
-        MSWA_UpdateEventRegistration()
+        local btn = icons[i]
+        if btn.spellID ~= nil or btn:IsShown() then
+            btn:Hide()
+            btn.icon:SetTexture(nil)
+            btn._msaCachedKey = nil
+            MSWA_ClearCooldownFrame(btn.cooldown)
+            MSWA_StopGlow(btn)
+            btn.spellID = nil
+            ClearStackAndCount(btn)
+        end
     end
 
     -----------------------------------------------------------
-    -- 5) Check if any auto-buff is still active (for engine)
+    -- 4) Masque + events: ONLY when count changes
+    -----------------------------------------------------------
+    if activeCount ~= lastActiveCount then
+        MSWA.activeIconCount = activeCount
+        MSWA_ReskinMasque(activeCount)
+        MSWA_UpdateEventRegistration()
+        lastActiveCount = activeCount
+    end
+
+    -----------------------------------------------------------
+    -- 5) Check if any auto-buff is still active
     -----------------------------------------------------------
     autoBuffActive = false
     local now = GetTime()
     for key, ab in pairs(autoBuff) do
         if ab and ab.active then
             local s2 = settingsTable[key] or settingsTable[tostring(key)]
-            local dur = (s2 and tonumber(s2.autoBuffDuration)) or 10
+            local dur = tonumber(s2 and s2.autoBuffDuration) or 10
             if (now - ab.startTime) < dur then
                 autoBuffActive = true
                 break
@@ -430,14 +451,13 @@ _G.MSWA_UpdateSpells = MSWA_UpdateSpells
 -----------------------------------------------------------
 
 local function AutoBuffTick(settingsTable)
-    local now     = GetTime()
+    local now = GetTime()
     local anyLeft = false
     local anyExpired = false
-
     for key, ab in pairs(MSWA._autoBuff) do
         if ab and ab.active then
             local s2 = settingsTable[key] or settingsTable[tostring(key)]
-            local dur = (s2 and tonumber(s2.autoBuffDuration)) or 10
+            local dur = tonumber(s2 and s2.autoBuffDuration) or 10
             if (now - ab.startTime) < dur then
                 anyLeft = true
             else
@@ -446,11 +466,8 @@ local function AutoBuffTick(settingsTable)
             end
         end
     end
-
     autoBuffActive = anyLeft
-    if anyExpired then
-        dirty = true
-    end
+    if anyExpired then dirty = true end
 end
 
 -----------------------------------------------------------
@@ -461,8 +478,7 @@ engineFrame:SetScript("OnUpdate", function(self)
     local now = GetTime()
 
     if autoBuffActive then
-        local db = MSWA_GetDB()
-        AutoBuffTick(db.spellSettings or {})
+        AutoBuffTick(MSWA_GetDB().spellSettings or {})
     end
 
     if dirty then
@@ -496,11 +512,19 @@ end
 
 function MSWA_InvalidateIconCache()
     WipeIconCache()
+    -- Clear texture caches on all buttons
+    if MSWA.icons then
+        for i = 1, MSWA.MAX_ICONS do
+            local btn = MSWA.icons[i]
+            if btn then btn._msaCachedKey = nil end
+        end
+    end
+    lastActiveCount = -1   -- Force Masque reskin + event re-reg
     MSWA_ForceUpdateSpells()
 end
 
 -----------------------------------------------------------
--- Event registration (dynamic based on active icons)
+-- Event registration (ONLY called when count changes)
 -----------------------------------------------------------
 
 MSWA_UpdateEventRegistration = function()
@@ -539,24 +563,21 @@ local mainFrame = MSWA.frame
 mainFrame:RegisterEvent("PLAYER_LOGIN")
 mainFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
-mainFrame:SetScript("OnEvent", function(self, event, arg1, ...)
+mainFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
         MSWA_UpdatePositionFromDB()
         MSWA_RefreshPlayerIdentity()
         WipeIconCache()
+        lastActiveCount = -1
         MSWA_ForceUpdateSpells()
         MSWA_ApplyUIFont()
-    elseif event == "UNIT_INVENTORY_CHANGED" and arg1 ~= "player" then
-        return
     elseif event == "UNIT_AURA" then
         if arg1 ~= "player" then return end
         MSWA_RequestUpdateSpells()
-    elseif event == "SPELL_UPDATE_COOLDOWN"
-        or event == "PLAYER_TALENT_UPDATE"
-        or event == "PLAYER_EQUIPMENT_CHANGED"
-        or event == "UNIT_INVENTORY_CHANGED"
-        or event == "BAG_UPDATE_COOLDOWN"
-        or event == "BAG_UPDATE" then
+    elseif event == "UNIT_INVENTORY_CHANGED" then
+        if arg1 ~= "player" then return end
+        MSWA_RequestUpdateSpells()
+    else
         MSWA_RequestUpdateSpells()
     end
 end)
@@ -570,18 +591,16 @@ do
     loadFilterFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     loadFilterFrame:RegisterEvent("ENCOUNTER_START")
     loadFilterFrame:RegisterEvent("ENCOUNTER_END")
-
     loadFilterFrame:SetScript("OnEvent", function()
         MSWA_InvalidateIconCache()
-        if MSWA_RefreshOptionsList and MSWA and MSWA.optionsFrame and MSWA.optionsFrame:IsShown() then
+        if MSWA_RefreshOptionsList and MSWA.optionsFrame and MSWA.optionsFrame:IsShown() then
             MSWA_RefreshOptionsList()
         end
     end)
 end
 
 -----------------------------------------------------------
--- Auto Buff (Spells): cast detection via UNIT_SPELLCAST_SUCCEEDED
--- (preserved 1:1 from original)
+-- Auto Buff (Spells): cast detection
 -----------------------------------------------------------
 do
     local abFrame = CreateFrame("Frame")
@@ -596,7 +615,7 @@ do
         if not castSpellID then return end
 
         local db = MSWA_GetDB()
-        if not db or not db.trackedSpells or not db.spellSettings then return end
+        if not db.trackedSpells or not db.spellSettings then return end
 
         local triggered = false
         for trackedKey, enabled in pairs(db.trackedSpells) do
@@ -610,10 +629,7 @@ do
                 if sid == castSpellID then
                     local s = db.spellSettings[trackedKey] or db.spellSettings[tostring(trackedKey)]
                     if s and s.auraMode == "AUTOBUFF" then
-                        MSWA._autoBuff[trackedKey] = {
-                            active    = true,
-                            startTime = GetTime(),
-                        }
+                        MSWA._autoBuff[trackedKey] = { active = true, startTime = GetTime() }
                         triggered = true
                     end
                 end
@@ -629,9 +645,6 @@ end
 
 -----------------------------------------------------------
 -- Auto Buff (Items): cooldown-start detection
---   Items don't fire UNIT_SPELLCAST_SUCCEEDED reliably,
---   so we detect when GetItemCooldown transitions from
---   idle Ã¢â€ â€™ active for tracked AUTOBUFF items.
 -----------------------------------------------------------
 do
     local itemCDFrame = CreateFrame("Frame")
@@ -643,46 +656,35 @@ do
     itemCDFrame:SetScript("OnEvent", function()
         if not GetItemCooldown then return end
         local db = MSWA_GetDB()
-        if not db or not db.trackedItems or not db.spellSettings then return end
+        if not db.trackedItems or not db.spellSettings then return end
 
         local triggered = false
         for itemID, enabled in pairs(db.trackedItems) do
             if enabled then
-                local key = ("item:%d"):format(itemID)
+                local key = GetItemKey(itemID)
                 local s = db.spellSettings[key] or db.spellSettings[tostring(key)]
                 if s and s.auraMode == "AUTOBUFF" then
                     local start, duration = GetItemCooldown(itemID)
                     local prevStart = lastItemCDStart[key] or 0
 
-                    -- Fresh cooldown: start changed AND duration > 1.5s (skip GCD)
-                    -- Wrap in pcall for secret-value safety
                     local isFreshCD = false
                     local isActiveCD = false
                     pcall(function()
                         if start and start > 0 and duration and duration > 1.5 then
                             isActiveCD = true
-                            if start ~= prevStart then
-                                isFreshCD = true
-                            end
+                            if start ~= prevStart then isFreshCD = true end
                         end
                     end)
 
                     if isFreshCD then
                         local ab = MSWA._autoBuff[key]
                         if not ab or not ab.active then
-                            MSWA._autoBuff[key] = {
-                                active    = true,
-                                startTime = GetTime(),
-                            }
+                            MSWA._autoBuff[key] = { active = true, startTime = GetTime() }
                             triggered = true
                         end
                     end
 
-                    if isActiveCD then
-                        lastItemCDStart[key] = start
-                    else
-                        lastItemCDStart[key] = 0
-                    end
+                    lastItemCDStart[key] = isActiveCD and start or 0
                 end
             end
         end

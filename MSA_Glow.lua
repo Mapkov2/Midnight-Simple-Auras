@@ -1,10 +1,10 @@
 -- ########################################################
 -- MSA_Glow.lua
 -- LibCustomGlow integration – conditional glow per aura
+-- v3: hot-path accepts gs directly, zero DB lookups
 -- ########################################################
 
-local pairs, type, tonumber = pairs, type, tonumber
-local GetTime = GetTime
+local type, tonumber = type, tonumber
 
 -----------------------------------------------------------
 -- Library reference
@@ -14,8 +14,8 @@ local LCG = LibStub and LibStub("LibCustomGlow-1.0", true)
 MSWA.LCG = LCG
 
 if not LCG then
-    -- Graceful degradation: stub out all glow functions
     function MSWA_UpdateGlow() end
+    function MSWA_UpdateGlow_Fast() end
     function MSWA_StopGlow() end
     function MSWA_StopAllGlows() end
     function MSWA_IsGlowAvailable() return false end
@@ -45,8 +45,8 @@ local GLOW_CONDITIONS = {
     ALWAYS       = "Always",
     READY        = "Ready (off CD)",
     ON_COOLDOWN  = "On Cooldown",
-    TIMER_BELOW  = "Timer ≤ X sec",
-    TIMER_ABOVE  = "Timer ≥ X sec",
+    TIMER_BELOW  = "Timer \xe2\x89\xa4 X sec",
+    TIMER_ABOVE  = "Timer \xe2\x89\xa5 X sec",
 }
 MSWA.GLOW_CONDITIONS = GLOW_CONDITIONS
 
@@ -72,7 +72,7 @@ local GLOW_DEFAULTS = {
 MSWA.GLOW_DEFAULTS = GLOW_DEFAULTS
 
 -----------------------------------------------------------
--- Helper: get glow settings with defaults
+-- Helper: get/create glow settings (Options UI only)
 -----------------------------------------------------------
 
 function MSWA_GetGlowSettings(spellSettings)
@@ -97,33 +97,25 @@ function MSWA_GetOrCreateGlowSettings(spellSettings)
 end
 
 -----------------------------------------------------------
--- Condition evaluation
+-- Condition evaluation (inlined, no function call overhead)
 -----------------------------------------------------------
 
 local function ShouldGlow(gs, remaining, isOnCooldown)
     if not gs or not gs.enabled then return false end
-
     local cond = gs.condition or "ALWAYS"
-
-    if cond == "ALWAYS" then
-        return true
-    elseif cond == "READY" then
-        return not isOnCooldown
-    elseif cond == "ON_COOLDOWN" then
-        return isOnCooldown
+    if cond == "ALWAYS" then return true
+    elseif cond == "READY" then return not isOnCooldown
+    elseif cond == "ON_COOLDOWN" then return isOnCooldown
     elseif cond == "TIMER_BELOW" then
-        local val = tonumber(gs.conditionValue) or 5
-        return isOnCooldown and remaining <= val and remaining > 0
+        return isOnCooldown and remaining <= (tonumber(gs.conditionValue) or 5) and remaining > 0
     elseif cond == "TIMER_ABOVE" then
-        local val = tonumber(gs.conditionValue) or 5
-        return isOnCooldown and remaining >= val
+        return isOnCooldown and remaining >= (tonumber(gs.conditionValue) or 5)
     end
-
     return false
 end
 
 -----------------------------------------------------------
--- Apply glow to a button
+-- Apply glow (unchanged)
 -----------------------------------------------------------
 
 local function ApplyGlow(btn, gs)
@@ -137,74 +129,42 @@ local function ApplyGlow(btn, gs)
     }
 
     if glowType == "PIXEL" then
-        local lines     = tonumber(gs.lines)     or GLOW_DEFAULTS.lines
-        local freq      = tonumber(gs.frequency)  or GLOW_DEFAULTS.frequency
-        local thickness = tonumber(gs.thickness)  or GLOW_DEFAULTS.thickness
-        LCG.PixelGlow_Start(btn, c, lines, freq, nil, thickness, 0, 0, false, GLOW_KEY)
-
+        LCG.PixelGlow_Start(btn, c, tonumber(gs.lines) or 8, tonumber(gs.frequency) or 0.25, nil, tonumber(gs.thickness) or 2, 0, 0, false, GLOW_KEY)
     elseif glowType == "AUTOCAST" then
-        local particles = tonumber(gs.lines) or 4
-        local freq      = tonumber(gs.frequency) or 0.125
-        local scale     = tonumber(gs.scale)     or GLOW_DEFAULTS.scale
-        LCG.AutoCastGlow_Start(btn, c, particles, freq, scale, 0, 0, GLOW_KEY)
-
+        LCG.AutoCastGlow_Start(btn, c, tonumber(gs.lines) or 4, tonumber(gs.frequency) or 0.125, tonumber(gs.scale) or 1, 0, 0, GLOW_KEY)
     elseif glowType == "BUTTON" then
-        local freq = tonumber(gs.frequency) or 0.125
-        LCG.ButtonGlow_Start(btn, c, freq)
-
+        LCG.ButtonGlow_Start(btn, c, tonumber(gs.frequency) or 0.125)
     elseif glowType == "PROC" then
-        local dur = tonumber(gs.duration) or GLOW_DEFAULTS.duration
-        LCG.ProcGlow_Start(btn, { color = c, duration = dur, key = GLOW_KEY })
+        LCG.ProcGlow_Start(btn, { color = c, duration = tonumber(gs.duration) or 1, key = GLOW_KEY })
     end
 end
 
 -----------------------------------------------------------
--- Stop glow on a button
+-- Stop glow
 -----------------------------------------------------------
 
 local function StopGlowOnButton(btn)
     if not btn then return end
     local gt = btn._msaGlowType
     if not gt then return end
-
-    if gt == "PIXEL" then
-        LCG.PixelGlow_Stop(btn, GLOW_KEY)
-    elseif gt == "AUTOCAST" then
-        LCG.AutoCastGlow_Stop(btn, GLOW_KEY)
-    elseif gt == "BUTTON" then
-        LCG.ButtonGlow_Stop(btn)
-    elseif gt == "PROC" then
-        LCG.ProcGlow_Stop(btn, GLOW_KEY)
-    end
+    if gt == "PIXEL" then LCG.PixelGlow_Stop(btn, GLOW_KEY)
+    elseif gt == "AUTOCAST" then LCG.AutoCastGlow_Stop(btn, GLOW_KEY)
+    elseif gt == "BUTTON" then LCG.ButtonGlow_Stop(btn)
+    elseif gt == "PROC" then LCG.ProcGlow_Stop(btn, GLOW_KEY) end
     btn._msaGlowType = nil
     btn._msaGlowActive = false
 end
 
 -----------------------------------------------------------
--- Public API: Update glow on a button
+-- HOT PATH: UpdateGlow_Fast (gs passed in, zero DB lookup)
 -----------------------------------------------------------
--- Called from MSA_UpdateEngine after each icon is set up
---   btn          = the icon button frame
---   key          = aura key
---   remaining    = seconds remaining on cooldown/buff (0 if ready)
---   isOnCooldown = true if spell/item is currently on cooldown
 
-function MSWA_UpdateGlow(btn, key, remaining, isOnCooldown)
-    if not LCG or not btn then return end
-
-    local db = MSWA_GetDB()
-    local s = db.spellSettings and (db.spellSettings[key] or db.spellSettings[tostring(key)])
-    local gs = s and s.glow
-
-    if ShouldGlow(gs, remaining or 0, isOnCooldown or false) then
+function MSWA_UpdateGlow_Fast(btn, gs, remaining, isOnCooldown)
+    if ShouldGlow(gs, remaining, isOnCooldown) then
         local newType = gs.glowType or "PIXEL"
-
-        -- If glow type changed, stop old one first
         if btn._msaGlowActive and btn._msaGlowType ~= newType then
             StopGlowOnButton(btn)
         end
-
-        -- Apply (LCG handles re-application gracefully)
         ApplyGlow(btn, gs)
         btn._msaGlowType = newType
         btn._msaGlowActive = true
@@ -216,7 +176,23 @@ function MSWA_UpdateGlow(btn, key, remaining, isOnCooldown)
 end
 
 -----------------------------------------------------------
--- Public API: Stop glow on a button
+-- Legacy: UpdateGlow (Options/preview, does own DB lookup)
+-----------------------------------------------------------
+
+function MSWA_UpdateGlow(btn, key, remaining, isOnCooldown)
+    if not LCG or not btn then return end
+    local db = MSWA_GetDB()
+    local s = db.spellSettings and (db.spellSettings[key] or db.spellSettings[tostring(key)])
+    local gs = s and s.glow
+    if not gs or not gs.enabled then
+        if btn._msaGlowActive then StopGlowOnButton(btn) end
+        return
+    end
+    MSWA_UpdateGlow_Fast(btn, gs, remaining or 0, isOnCooldown or false)
+end
+
+-----------------------------------------------------------
+-- Public API: Stop glow
 -----------------------------------------------------------
 
 function MSWA_StopGlow(btn)
@@ -224,13 +200,8 @@ function MSWA_StopGlow(btn)
     StopGlowOnButton(btn)
 end
 
------------------------------------------------------------
--- Public API: Stop all glows (cleanup)
------------------------------------------------------------
-
 function MSWA_StopAllGlows()
-    if not LCG then return end
-    if not MSWA.icons then return end
+    if not LCG or not MSWA.icons then return end
     for i = 1, MSWA.MAX_ICONS do
         local btn = MSWA.icons[i]
         if btn then StopGlowOnButton(btn) end

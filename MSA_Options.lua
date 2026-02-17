@@ -395,8 +395,8 @@ MSWA_UpdateDetailPanel = function()
     -- Sync Stack controls
     if f.stackShowMode then
         local mode = (s and s.stackShowMode) or "auto"
-        local stackShowLabels = { auto = "Auto", show = "Force Show", hide = "Force Hide" }
-        f.stackShowMode:SetText(stackShowLabels[mode] or "Auto")
+        local stackShowLabels2 = { auto = "Auto", show = "Force Show", hide = "Force Hide" }
+        f.stackShowMode:SetText(stackShowLabels2[mode] or "Auto")
     end
     if f.stackSizeEdit then
         local sz = (s and s.stackFontSize) or 12
@@ -417,8 +417,8 @@ MSWA_UpdateDetailPanel = function()
     if f.stackOffYEdit then
         f.stackOffYEdit:SetText(tostring((s and s.stackOffsetY) or 0))
     end
-    if f.stackFontDrop then
-        if f._initStackFontDrop then f._initStackFontDrop() end
+    if f.stackFontDrop and f._initStackFontDrop then
+        f._initStackFontDrop()
     end
 
     -- Sync Auto Buff controls
@@ -586,6 +586,9 @@ local function MSWA_CreateOptionsFrame()
 
     f.btnPreview = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.btnPreview:SetSize(70, 22)
     f.btnPreview:SetPoint("LEFT", f.btnGroup, "RIGHT", 6, 0); f.btnPreview:SetText("Preview")
+
+    f.btnIDInfo = CreateFrame("Button", nil, f, "UIPanelButtonTemplate"); f.btnIDInfo:SetSize(60, 22)
+    f.btnIDInfo:SetPoint("LEFT", f.btnPreview, "RIGHT", 6, 0); f.btnIDInfo:SetText("ID Info")
 
     -- Scroll frame + rows
     local rowHeight = 24
@@ -1661,38 +1664,54 @@ local function MSWA_CreateOptionsFrame()
 
     -- Display tab
     f.displayPanel = CreateFrame("Frame", nil, rightPanel); f.displayPanel:SetPoint("TOPLEFT", 12, -60); f.displayPanel:SetPoint("BOTTOMRIGHT", -12, 12); f.displayPanel:Hide()
-    local labelX = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelX:SetPoint("TOPLEFT", 10, -10); labelX:SetText("Offset X:")
-    f.detailX = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate"); f.detailX:SetSize(70, 20); f.detailX:SetPoint("LEFT", labelX, "RIGHT", 6, 0); f.detailX:SetAutoFocus(false)
-    f.detailXMinus = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate"); f.detailXMinus:SetSize(20, 20); f.detailXMinus:SetPoint("LEFT", f.detailX, "RIGHT", 2, 0); f.detailXMinus:SetText("-")
-    f.detailXPlus = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate"); f.detailXPlus:SetSize(20, 20); f.detailXPlus:SetPoint("LEFT", f.detailXMinus, "RIGHT", 2, 0); f.detailXPlus:SetText("+")
-    local labelY = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelY:SetPoint("TOPLEFT", labelX, "BOTTOMLEFT", 0, -10); labelY:SetText("Offset Y:")
-    f.detailY = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate"); f.detailY:SetSize(70, 20); f.detailY:SetPoint("LEFT", labelY, "RIGHT", 6, 0); f.detailY:SetAutoFocus(false)
-    f.detailYMinus = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate"); f.detailYMinus:SetSize(20, 20); f.detailYMinus:SetPoint("LEFT", f.detailY, "RIGHT", 2, 0); f.detailYMinus:SetText("-")
-    f.detailYPlus = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate"); f.detailYPlus:SetSize(20, 20); f.detailYPlus:SetPoint("LEFT", f.detailYMinus, "RIGHT", 2, 0); f.detailYPlus:SetText("+")
-    local labelW = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelW:SetPoint("TOPLEFT", labelY, "BOTTOMLEFT", 0, -14); labelW:SetText("Width:")
-    f.detailW = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate"); f.detailW:SetSize(70, 20); f.detailW:SetPoint("LEFT", labelW, "RIGHT", 6, 0); f.detailW:SetAutoFocus(false)
-    local labelH = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelH:SetPoint("TOPLEFT", labelW, "BOTTOMLEFT", 0, -10); labelH:SetText("Height:")
-    f.detailH = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate"); f.detailH:SetSize(70, 20); f.detailH:SetPoint("LEFT", labelH, "RIGHT", 6, 0); f.detailH:SetAutoFocus(false)
 
-    f.fontLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.fontLabel:SetPoint("TOPLEFT", labelH, "BOTTOMLEFT", 0, -18); f.fontLabel:SetText("Font:")
-    f.fontDrop = CreateFrame("Frame", "MSWA_FontDropDown", f.displayPanel, "UIDropDownMenuTemplate"); f.fontDrop:SetPoint("LEFT", f.fontLabel, "RIGHT", -10, -3)
-    f.fontPreview = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.fontPreview:SetPoint("LEFT", f.fontDrop, "RIGHT", -10, 0); f.fontPreview:SetText("AaBbYyZz 123")
+    -- Scroll frame inside displayPanel (prevents clipping on small windows)
+    local dpScroll = CreateFrame("ScrollFrame", "MSWA_DisplayScrollFrame", f.displayPanel, "UIPanelScrollFrameTemplate")
+    dpScroll:SetPoint("TOPLEFT", 0, 0)
+    dpScroll:SetPoint("BOTTOMRIGHT", -26, 0)
+    f._displayScroll = dpScroll
 
-    f.textSizeLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.textSizeLabel:SetPoint("TOPLEFT", f.fontLabel, "BOTTOMLEFT", 0, -16); f.textSizeLabel:SetText("Text size:")
-    f.textSizeEdit = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate"); f.textSizeEdit:SetSize(50, 20); f.textSizeEdit:SetPoint("LEFT", f.textSizeLabel, "RIGHT", 6, 0); f.textSizeEdit:SetAutoFocus(false); f.textSizeEdit:SetNumeric(true)
-    f.textSizeMinus = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate"); f.textSizeMinus:SetSize(20, 20); f.textSizeMinus:SetPoint("LEFT", f.textSizeEdit, "RIGHT", 2, 0); f.textSizeMinus:SetText("-")
-    f.textSizePlus = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate"); f.textSizePlus:SetSize(20, 20); f.textSizePlus:SetPoint("LEFT", f.textSizeMinus, "RIGHT", 2, 0); f.textSizePlus:SetText("+")
+    local dp = CreateFrame("Frame")
+    dp:SetWidth(400)
+    dpScroll:SetScrollChild(dp)
+    f._displayContent = dp
 
-    f.textPosLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.textPosLabel:SetPoint("LEFT", f.textSizePlus, "RIGHT", 14, 0); f.textPosLabel:SetText("Pos:")
-    f.textPosDrop = CreateFrame("Frame", "MSWA_TextPosDropDown", f.displayPanel, "UIDropDownMenuTemplate"); f.textPosDrop:SetPoint("LEFT", f.textPosLabel, "RIGHT", -10, -3)
+    dpScroll:SetScript("OnSizeChanged", function(self, w)
+        if w and w > 30 then dp:SetWidth(w) end
+    end)
 
-    f.textColorLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.textColorLabel:SetPoint("TOPLEFT", f.textSizeLabel, "BOTTOMLEFT", 0, -12); f.textColorLabel:SetText("Text color:")
-    f.textColorBtn = CreateFrame("Button", nil, f.displayPanel); f.textColorBtn:SetSize(18, 18); f.textColorBtn:SetPoint("LEFT", f.textColorLabel, "RIGHT", 8, 0); f.textColorBtn:EnableMouse(true)
+    local labelX = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelX:SetPoint("TOPLEFT", 10, -10); labelX:SetText("Offset X:")
+    f.detailX = CreateFrame("EditBox", nil, dp, "InputBoxTemplate"); f.detailX:SetSize(70, 20); f.detailX:SetPoint("LEFT", labelX, "RIGHT", 6, 0); f.detailX:SetAutoFocus(false)
+    f.detailXMinus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.detailXMinus:SetSize(20, 20); f.detailXMinus:SetPoint("LEFT", f.detailX, "RIGHT", 2, 0); f.detailXMinus:SetText("-")
+    f.detailXPlus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.detailXPlus:SetSize(20, 20); f.detailXPlus:SetPoint("LEFT", f.detailXMinus, "RIGHT", 2, 0); f.detailXPlus:SetText("+")
+    local labelY = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelY:SetPoint("TOPLEFT", labelX, "BOTTOMLEFT", 0, -10); labelY:SetText("Offset Y:")
+    f.detailY = CreateFrame("EditBox", nil, dp, "InputBoxTemplate"); f.detailY:SetSize(70, 20); f.detailY:SetPoint("LEFT", labelY, "RIGHT", 6, 0); f.detailY:SetAutoFocus(false)
+    f.detailYMinus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.detailYMinus:SetSize(20, 20); f.detailYMinus:SetPoint("LEFT", f.detailY, "RIGHT", 2, 0); f.detailYMinus:SetText("-")
+    f.detailYPlus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.detailYPlus:SetSize(20, 20); f.detailYPlus:SetPoint("LEFT", f.detailYMinus, "RIGHT", 2, 0); f.detailYPlus:SetText("+")
+    local labelW = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelW:SetPoint("TOPLEFT", labelY, "BOTTOMLEFT", 0, -14); labelW:SetText("Width:")
+    f.detailW = CreateFrame("EditBox", nil, dp, "InputBoxTemplate"); f.detailW:SetSize(70, 20); f.detailW:SetPoint("LEFT", labelW, "RIGHT", 6, 0); f.detailW:SetAutoFocus(false)
+    local labelH = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelH:SetPoint("TOPLEFT", labelW, "BOTTOMLEFT", 0, -10); labelH:SetText("Height:")
+    f.detailH = CreateFrame("EditBox", nil, dp, "InputBoxTemplate"); f.detailH:SetSize(70, 20); f.detailH:SetPoint("LEFT", labelH, "RIGHT", 6, 0); f.detailH:SetAutoFocus(false)
+
+    f.fontLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.fontLabel:SetPoint("TOPLEFT", labelH, "BOTTOMLEFT", 0, -18); f.fontLabel:SetText("Font:")
+    f.fontDrop = CreateFrame("Frame", "MSWA_FontDropDown", dp, "UIDropDownMenuTemplate"); f.fontDrop:SetPoint("LEFT", f.fontLabel, "RIGHT", -10, -3)
+    f.fontPreview = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.fontPreview:SetPoint("LEFT", f.fontDrop, "RIGHT", -10, 0); f.fontPreview:SetText("AaBbYyZz 123")
+
+    f.textSizeLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.textSizeLabel:SetPoint("TOPLEFT", f.fontLabel, "BOTTOMLEFT", 0, -16); f.textSizeLabel:SetText("Text size:")
+    f.textSizeEdit = CreateFrame("EditBox", nil, dp, "InputBoxTemplate"); f.textSizeEdit:SetSize(50, 20); f.textSizeEdit:SetPoint("LEFT", f.textSizeLabel, "RIGHT", 6, 0); f.textSizeEdit:SetAutoFocus(false); f.textSizeEdit:SetNumeric(true)
+    f.textSizeMinus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.textSizeMinus:SetSize(20, 20); f.textSizeMinus:SetPoint("LEFT", f.textSizeEdit, "RIGHT", 2, 0); f.textSizeMinus:SetText("-")
+    f.textSizePlus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.textSizePlus:SetSize(20, 20); f.textSizePlus:SetPoint("LEFT", f.textSizeMinus, "RIGHT", 2, 0); f.textSizePlus:SetText("+")
+
+    f.textPosLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.textPosLabel:SetPoint("LEFT", f.textSizePlus, "RIGHT", 14, 0); f.textPosLabel:SetText("Pos:")
+    f.textPosDrop = CreateFrame("Frame", "MSWA_TextPosDropDown", dp, "UIDropDownMenuTemplate"); f.textPosDrop:SetPoint("LEFT", f.textPosLabel, "RIGHT", -10, -3)
+
+    f.textColorLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.textColorLabel:SetPoint("TOPLEFT", f.textSizeLabel, "BOTTOMLEFT", 0, -12); f.textColorLabel:SetText("Text color:")
+    f.textColorBtn = CreateFrame("Button", nil, dp); f.textColorBtn:SetSize(18, 18); f.textColorBtn:SetPoint("LEFT", f.textColorLabel, "RIGHT", 8, 0); f.textColorBtn:EnableMouse(true)
     f.textColorSwatch = f.textColorBtn:CreateTexture(nil, "ARTWORK"); f.textColorSwatch:SetAllPoints(true); f.textColorSwatch:SetColorTexture(1, 1, 1, 1)
     f.textColorBorder = f.textColorBtn:CreateTexture(nil, "BORDER"); f.textColorBorder:SetPoint("TOPLEFT", -1, 1); f.textColorBorder:SetPoint("BOTTOMRIGHT", 1, -1); f.textColorBorder:SetColorTexture(0, 0, 0, 1)
 
-    f.grayCooldownCheck = CreateFrame("CheckButton", nil, f.displayPanel, "ChatConfigCheckButtonTemplate"); f.grayCooldownCheck:SetPoint("TOPLEFT", f.textColorLabel, "BOTTOMLEFT", -4, -14)
-    f.grayCooldownLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.grayCooldownLabel:SetPoint("LEFT", f.grayCooldownCheck, "RIGHT", 2, 0); f.grayCooldownLabel:SetText("Grayscale on cooldown")
+    f.grayCooldownCheck = CreateFrame("CheckButton", nil, dp, "ChatConfigCheckButtonTemplate"); f.grayCooldownCheck:SetPoint("TOPLEFT", f.textColorLabel, "BOTTOMLEFT", -4, -14)
+    f.grayCooldownLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.grayCooldownLabel:SetPoint("LEFT", f.grayCooldownCheck, "RIGHT", 2, 0); f.grayCooldownLabel:SetText("Grayscale on cooldown")
     f.grayCooldownCheck:SetScript("OnClick", function(self)
         local key = MSWA.selectedSpellID; if not key then return end
         local s = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key)); s.grayOnCooldown = self:GetChecked() and true or nil
@@ -1700,9 +1719,9 @@ local function MSWA_CreateOptionsFrame()
     end)
 
     -- Swipe darkens on loss
-    f.swipeDarkenCheck = CreateFrame("CheckButton", nil, f.displayPanel, "ChatConfigCheckButtonTemplate")
+    f.swipeDarkenCheck = CreateFrame("CheckButton", nil, dp, "ChatConfigCheckButtonTemplate")
     f.swipeDarkenCheck:SetPoint("TOPLEFT", f.grayCooldownCheck, "BOTTOMLEFT", 0, -4)
-    f.swipeDarkenLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.swipeDarkenLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.swipeDarkenLabel:SetPoint("LEFT", f.swipeDarkenCheck, "RIGHT", 2, 0)
     f.swipeDarkenLabel:SetText("Swipe darkens on loss")
     f.swipeDarkenCheck:SetScript("OnClick", function(self)
@@ -1713,15 +1732,15 @@ local function MSWA_CreateOptionsFrame()
     end)
 
     -- ======= Stack Text Section =======
-    local stackSep = f.displayPanel:CreateTexture(nil, "ARTWORK")
+    local stackSep = dp:CreateTexture(nil, "ARTWORK")
     stackSep:SetPoint("TOPLEFT", f.swipeDarkenCheck, "BOTTOMLEFT", 4, -10)
     stackSep:SetSize(400, 1); stackSep:SetColorTexture(1, 1, 1, 0.12)
 
-    f.stackShowLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackShowLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.stackShowLabel:SetPoint("TOPLEFT", stackSep, "BOTTOMLEFT", 0, -8)
     f.stackShowLabel:SetText("|cffffcc00Stacks|r")
 
-    f.stackShowMode = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate")
+    f.stackShowMode = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate")
     f.stackShowMode:SetSize(100, 20); f.stackShowMode:SetPoint("LEFT", f.stackShowLabel, "RIGHT", 10, 0)
     f.stackShowMode:SetText("Auto")
 
@@ -1740,150 +1759,48 @@ local function MSWA_CreateOptionsFrame()
     end)
 
     -- Stack Font
-    f.stackFontLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackFontLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.stackFontLabel:SetPoint("TOPLEFT", f.stackShowLabel, "BOTTOMLEFT", 0, -12)
     f.stackFontLabel:SetText("Font:")
-    f.stackFontDrop = CreateFrame("Frame", "MSWA_StackFontDropDown", f.displayPanel, "UIDropDownMenuTemplate")
+    f.stackFontDrop = CreateFrame("Frame", "MSWA_StackFontDropDown", dp, "UIDropDownMenuTemplate")
     f.stackFontDrop:SetPoint("LEFT", f.stackFontLabel, "RIGHT", -10, -3)
 
     -- Stack Size
-    f.stackSizeLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackSizeLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.stackSizeLabel:SetPoint("TOPLEFT", f.stackFontLabel, "BOTTOMLEFT", 0, -16)
     f.stackSizeLabel:SetText("Size:")
-    f.stackSizeEdit = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate")
+    f.stackSizeEdit = CreateFrame("EditBox", nil, dp, "InputBoxTemplate")
     f.stackSizeEdit:SetSize(50, 20); f.stackSizeEdit:SetPoint("LEFT", f.stackSizeLabel, "RIGHT", 6, 0); f.stackSizeEdit:SetAutoFocus(false); f.stackSizeEdit:SetNumeric(true)
-    f.stackSizeMinus = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate"); f.stackSizeMinus:SetSize(20, 20); f.stackSizeMinus:SetPoint("LEFT", f.stackSizeEdit, "RIGHT", 2, 0); f.stackSizeMinus:SetText("-")
-    f.stackSizePlus = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate"); f.stackSizePlus:SetSize(20, 20); f.stackSizePlus:SetPoint("LEFT", f.stackSizeMinus, "RIGHT", 2, 0); f.stackSizePlus:SetText("+")
+    f.stackSizeMinus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.stackSizeMinus:SetSize(20, 20); f.stackSizeMinus:SetPoint("LEFT", f.stackSizeEdit, "RIGHT", 2, 0); f.stackSizeMinus:SetText("-")
+    f.stackSizePlus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.stackSizePlus:SetSize(20, 20); f.stackSizePlus:SetPoint("LEFT", f.stackSizeMinus, "RIGHT", 2, 0); f.stackSizePlus:SetText("+")
 
     -- Stack Pos
-    f.stackPosLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackPosLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.stackPosLabel:SetPoint("LEFT", f.stackSizePlus, "RIGHT", 14, 0)
     f.stackPosLabel:SetText("Pos:")
-    f.stackPosDrop = CreateFrame("Frame", "MSWA_StackPosDropDown", f.displayPanel, "UIDropDownMenuTemplate")
+    f.stackPosDrop = CreateFrame("Frame", "MSWA_StackPosDropDown", dp, "UIDropDownMenuTemplate")
     f.stackPosDrop:SetPoint("LEFT", f.stackPosLabel, "RIGHT", -10, -3)
 
     -- Stack Color
-    f.stackColorLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackColorLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.stackColorLabel:SetPoint("TOPLEFT", f.stackSizeLabel, "BOTTOMLEFT", 0, -12)
     f.stackColorLabel:SetText("Color:")
-    f.stackColorBtn = CreateFrame("Button", nil, f.displayPanel); f.stackColorBtn:SetSize(18, 18); f.stackColorBtn:SetPoint("LEFT", f.stackColorLabel, "RIGHT", 8, 0); f.stackColorBtn:EnableMouse(true)
+    f.stackColorBtn = CreateFrame("Button", nil, dp); f.stackColorBtn:SetSize(18, 18); f.stackColorBtn:SetPoint("LEFT", f.stackColorLabel, "RIGHT", 8, 0); f.stackColorBtn:EnableMouse(true)
     f.stackColorSwatch = f.stackColorBtn:CreateTexture(nil, "ARTWORK"); f.stackColorSwatch:SetAllPoints(true); f.stackColorSwatch:SetColorTexture(1, 1, 1, 1)
     local stackColorBorder = f.stackColorBtn:CreateTexture(nil, "BORDER"); stackColorBorder:SetPoint("TOPLEFT", f.stackColorBtn, "TOPLEFT", -1, 1); stackColorBorder:SetPoint("BOTTOMRIGHT", f.stackColorBtn, "BOTTOMRIGHT", 1, -1); stackColorBorder:SetColorTexture(0, 0, 0, 1)
 
     -- Stack Offset X/Y
-    f.stackOffXLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackOffXLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.stackOffXLabel:SetPoint("LEFT", f.stackColorBtn, "RIGHT", 16, 0)
     f.stackOffXLabel:SetText("Offset X:")
-    f.stackOffXEdit = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate")
+    f.stackOffXEdit = CreateFrame("EditBox", nil, dp, "InputBoxTemplate")
     f.stackOffXEdit:SetSize(40, 20); f.stackOffXEdit:SetPoint("LEFT", f.stackOffXLabel, "RIGHT", 4, 0); f.stackOffXEdit:SetAutoFocus(false)
 
-    f.stackOffYLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.stackOffYLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.stackOffYLabel:SetPoint("LEFT", f.stackOffXEdit, "RIGHT", 10, 0)
     f.stackOffYLabel:SetText("Y:")
-    f.stackOffYEdit = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate")
+    f.stackOffYEdit = CreateFrame("EditBox", nil, dp, "InputBoxTemplate")
     f.stackOffYEdit:SetSize(40, 20); f.stackOffYEdit:SetPoint("LEFT", f.stackOffYLabel, "RIGHT", 4, 0); f.stackOffYEdit:SetAutoFocus(false)
-
-    -- ======= Conditional 2nd Text Color =======
-    local tc2Sep = f.displayPanel:CreateTexture(nil, "ARTWORK")
-    tc2Sep:SetPoint("TOPLEFT", f.stackColorLabel, "BOTTOMLEFT", 0, -10)
-    tc2Sep:SetSize(400, 1); tc2Sep:SetColorTexture(1, 1, 1, 0.12)
-
-    f.tc2Check = CreateFrame("CheckButton", nil, f.displayPanel, "ChatConfigCheckButtonTemplate")
-    f.tc2Check:SetPoint("TOPLEFT", tc2Sep, "BOTTOMLEFT", -4, -8)
-    f.tc2Label = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.tc2Label:SetPoint("LEFT", f.tc2Check, "RIGHT", 2, 0)
-    f.tc2Label:SetText("|cffffcc00Conditional text color|r")
-
-    -- 2nd color swatch
-    f.tc2ColorLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.tc2ColorLabel:SetPoint("TOPLEFT", f.tc2Check, "BOTTOMLEFT", 22, -8)
-    f.tc2ColorLabel:SetText("Color:")
-    f.tc2ColorBtn = CreateFrame("Button", nil, f.displayPanel)
-    f.tc2ColorBtn:SetSize(18, 18); f.tc2ColorBtn:SetPoint("LEFT", f.tc2ColorLabel, "RIGHT", 6, 0); f.tc2ColorBtn:EnableMouse(true)
-    f.tc2ColorSwatch = f.tc2ColorBtn:CreateTexture(nil, "ARTWORK"); f.tc2ColorSwatch:SetAllPoints(true); f.tc2ColorSwatch:SetColorTexture(1, 0, 0, 1)
-    local tc2Border = f.tc2ColorBtn:CreateTexture(nil, "BORDER"); tc2Border:SetPoint("TOPLEFT", f.tc2ColorBtn, "TOPLEFT", -1, 1); tc2Border:SetPoint("BOTTOMRIGHT", f.tc2ColorBtn, "BOTTOMRIGHT", 1, -1); tc2Border:SetColorTexture(0, 0, 0, 1)
-
-    -- Condition button (cycles: TIMER_BELOW â†’ TIMER_ABOVE)
-    f.tc2CondLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.tc2CondLabel:SetPoint("LEFT", f.tc2ColorBtn, "RIGHT", 16, 0)
-    f.tc2CondLabel:SetText("When:")
-    f.tc2CondButton = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate")
-    f.tc2CondButton:SetSize(90, 20); f.tc2CondButton:SetPoint("LEFT", f.tc2CondLabel, "RIGHT", 4, 0)
-
-    -- Threshold value (editbox right of button, then "sec" label)
-    f.tc2ValueEdit = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate")
-    f.tc2ValueEdit:SetSize(40, 20); f.tc2ValueEdit:SetPoint("LEFT", f.tc2CondButton, "RIGHT", 6, 0)
-    f.tc2ValueEdit:SetAutoFocus(false)
-    f.tc2ValueLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.tc2ValueLabel:SetPoint("LEFT", f.tc2ValueEdit, "RIGHT", 4, 0)
-    f.tc2ValueLabel:SetText("sec")
-
-    -- Helper: update condition button text
-    local function UpdateTC2CondText(cond)
-        if not f.tc2CondButton then return end
-        if cond == "TIMER_ABOVE" then
-            f.tc2CondButton:SetText("Timer >= X")
-        else
-            f.tc2CondButton:SetText("Timer <= X")
-        end
-    end
-
-    -- Enable checkbox
-    f.tc2Check:SetScript("OnClick", function(self)
-        local key = MSWA.selectedSpellID; if not key then return end
-        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
-        s2.textColor2Enabled = self:GetChecked() and true or nil
-        if s2.textColor2Enabled and not s2.textColor2 then
-            s2.textColor2 = { r = 1, g = 0.2, b = 0.2 }
-        end
-        MSWA_RequestUpdateSpells(); MSWA_UpdateDetailPanel()
-    end)
-
-    -- Condition cycle
-    f.tc2CondButton:SetScript("OnClick", function()
-        local key = MSWA.selectedSpellID; if not key then return end
-        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
-        local cur = s2.textColor2Cond or "TIMER_BELOW"
-        s2.textColor2Cond = (cur == "TIMER_BELOW") and "TIMER_ABOVE" or "TIMER_BELOW"
-        UpdateTC2CondText(s2.textColor2Cond)
-        MSWA_RequestUpdateSpells()
-    end)
-
-    -- Value edit
-    local function ApplyTC2Value()
-        local key = MSWA.selectedSpellID; if not key then return end
-        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
-        local v = tonumber(f.tc2ValueEdit:GetText())
-        if v and v >= 0 then s2.textColor2Value = v end
-        MSWA_RequestUpdateSpells()
-    end
-    f.tc2ValueEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyTC2Value() end)
-    f.tc2ValueEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    f.tc2ValueEdit:SetScript("OnEditFocusLost", function() ApplyTC2Value() end)
-
-    -- Color picker for 2nd color
-    f.tc2ColorBtn:SetScript("OnClick", function()
-        local keyAtOpen = MSWA.selectedSpellID; if not keyAtOpen then return end
-        local db3 = MSWA_GetDB()
-        local ss = keyAtOpen and select(1, MSWA_GetSpellSettings(db3, keyAtOpen)) or nil
-        local tc2 = (ss and ss.textColor2) or { r = 1, g = 0.2, b = 0.2 }
-        local r, g, b = tonumber(tc2.r) or 1, tonumber(tc2.g) or 0.2, tonumber(tc2.b) or 0.2
-        local function ApplyC2(nr, ng, nb)
-            local s3 = keyAtOpen and select(1, MSWA_GetOrCreateSpellSettings(db3, keyAtOpen)) or nil
-            if s3 then s3.textColor2 = s3.textColor2 or {}; s3.textColor2.r = nr; s3.textColor2.g = ng; s3.textColor2.b = nb end
-            if f.tc2ColorSwatch and MSWA_KeyEquals(MSWA.selectedSpellID, keyAtOpen) then f.tc2ColorSwatch:SetColorTexture(nr, ng, nb, 1) end
-            MSWA_RequestUpdateSpells()
-        end
-        if ColorPickerFrame and ColorPickerFrame.SetupColorPickerAndShow then
-            local function OnChanged() local nr, ng, nb = ColorPickerFrame:GetColorRGB(); if type(nr) == "number" then ApplyC2(nr, ng, nb) end end
-            ColorPickerFrame:SetupColorPickerAndShow({ r=r, g=g, b=b, hasOpacity=false, swatchFunc=OnChanged, func=OnChanged, okayFunc=OnChanged, cancelFunc=function(restore) if type(restore) == "table" then ApplyC2(restore.r or r, restore.g or g, restore.b or b) else ApplyC2(r, g, b) end end })
-        elseif ColorPickerFrame then
-            ColorPickerFrame.hasOpacity = false; ColorPickerFrame.previousValues = { r=r, g=g, b=b }
-            ColorPickerFrame.func = function() ApplyC2(ColorPickerFrame:GetColorRGB()) end
-            ColorPickerFrame.cancelFunc = function(prev) if type(prev) == "table" then ApplyC2(prev.r or r, prev.g or g, prev.b or b) else ApplyC2(r, g, b) end end
-            ColorPickerFrame:SetColorRGB(r, g, b); ColorPickerFrame:Show()
-        end
-    end)
 
     -- ======= Stack control scripts =======
     -- Stack font dropdown
@@ -1911,7 +1828,6 @@ local function MSWA_CreateOptionsFrame()
             end)
             f._mswaStackFontDropInitialized = true
         end
-        -- Set current value
         local db = MSWA_GetDB(); local auraKey = MSWA.selectedSpellID
         local ss = auraKey and select(1, MSWA_GetSpellSettings(db, auraKey)) or nil
         local fontKey = (ss and ss.stackFontKey) or "DEFAULT"
@@ -2002,6 +1918,111 @@ local function MSWA_CreateOptionsFrame()
         f.stackOffYEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyStackOffset() end)
         f.stackOffYEdit:SetScript("OnEditFocusLost", function() ApplyStackOffset() end)
     end
+
+    -- ======= Conditional 2nd Text Color =======
+    local tc2Sep = dp:CreateTexture(nil, "ARTWORK")
+    tc2Sep:SetPoint("TOPLEFT", f.stackColorLabel, "BOTTOMLEFT", 0, -10)
+    tc2Sep:SetSize(400, 1); tc2Sep:SetColorTexture(1, 1, 1, 0.12)
+
+    f.tc2Check = CreateFrame("CheckButton", nil, dp, "ChatConfigCheckButtonTemplate")
+    f.tc2Check:SetPoint("TOPLEFT", tc2Sep, "BOTTOMLEFT", -4, -8)
+    f.tc2Label = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.tc2Label:SetPoint("LEFT", f.tc2Check, "RIGHT", 2, 0)
+    f.tc2Label:SetText("|cffffcc00Conditional text color|r")
+
+    -- 2nd color swatch
+    f.tc2ColorLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.tc2ColorLabel:SetPoint("TOPLEFT", f.tc2Check, "BOTTOMLEFT", 22, -8)
+    f.tc2ColorLabel:SetText("Color:")
+    f.tc2ColorBtn = CreateFrame("Button", nil, dp)
+    f.tc2ColorBtn:SetSize(18, 18); f.tc2ColorBtn:SetPoint("LEFT", f.tc2ColorLabel, "RIGHT", 6, 0); f.tc2ColorBtn:EnableMouse(true)
+    f.tc2ColorSwatch = f.tc2ColorBtn:CreateTexture(nil, "ARTWORK"); f.tc2ColorSwatch:SetAllPoints(true); f.tc2ColorSwatch:SetColorTexture(1, 0, 0, 1)
+    local tc2Border = f.tc2ColorBtn:CreateTexture(nil, "BORDER"); tc2Border:SetPoint("TOPLEFT", f.tc2ColorBtn, "TOPLEFT", -1, 1); tc2Border:SetPoint("BOTTOMRIGHT", f.tc2ColorBtn, "BOTTOMRIGHT", 1, -1); tc2Border:SetColorTexture(0, 0, 0, 1)
+
+    -- Condition button (cycles: TIMER_BELOW â†’ TIMER_ABOVE)
+    f.tc2CondLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.tc2CondLabel:SetPoint("LEFT", f.tc2ColorBtn, "RIGHT", 16, 0)
+    f.tc2CondLabel:SetText("When:")
+    f.tc2CondButton = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate")
+    f.tc2CondButton:SetSize(90, 20); f.tc2CondButton:SetPoint("LEFT", f.tc2CondLabel, "RIGHT", 4, 0)
+
+    -- Threshold value (editbox right of button, then "sec" label)
+    f.tc2ValueEdit = CreateFrame("EditBox", nil, dp, "InputBoxTemplate")
+    f.tc2ValueEdit:SetSize(40, 20); f.tc2ValueEdit:SetPoint("LEFT", f.tc2CondButton, "RIGHT", 6, 0)
+    f.tc2ValueEdit:SetAutoFocus(false)
+    f.tc2ValueLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.tc2ValueLabel:SetPoint("LEFT", f.tc2ValueEdit, "RIGHT", 4, 0)
+    f.tc2ValueLabel:SetText("sec")
+
+    -- Set scroll child height (covers all content so scrollbar appears when needed)
+    dp:SetHeight(560)
+
+    -- Helper: update condition button text
+    local function UpdateTC2CondText(cond)
+        if not f.tc2CondButton then return end
+        if cond == "TIMER_ABOVE" then
+            f.tc2CondButton:SetText("Timer >= X")
+        else
+            f.tc2CondButton:SetText("Timer <= X")
+        end
+    end
+
+    -- Enable checkbox
+    f.tc2Check:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.textColor2Enabled = self:GetChecked() and true or nil
+        if s2.textColor2Enabled and not s2.textColor2 then
+            s2.textColor2 = { r = 1, g = 0.2, b = 0.2 }
+        end
+        MSWA_RequestUpdateSpells(); MSWA_UpdateDetailPanel()
+    end)
+
+    -- Condition cycle
+    f.tc2CondButton:SetScript("OnClick", function()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local cur = s2.textColor2Cond or "TIMER_BELOW"
+        s2.textColor2Cond = (cur == "TIMER_BELOW") and "TIMER_ABOVE" or "TIMER_BELOW"
+        UpdateTC2CondText(s2.textColor2Cond)
+        MSWA_RequestUpdateSpells()
+    end)
+
+    -- Value edit
+    local function ApplyTC2Value()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local v = tonumber(f.tc2ValueEdit:GetText())
+        if v and v >= 0 then s2.textColor2Value = v end
+        MSWA_RequestUpdateSpells()
+    end
+    f.tc2ValueEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyTC2Value() end)
+    f.tc2ValueEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    f.tc2ValueEdit:SetScript("OnEditFocusLost", function() ApplyTC2Value() end)
+
+    -- Color picker for 2nd color
+    f.tc2ColorBtn:SetScript("OnClick", function()
+        local keyAtOpen = MSWA.selectedSpellID; if not keyAtOpen then return end
+        local db3 = MSWA_GetDB()
+        local ss = keyAtOpen and select(1, MSWA_GetSpellSettings(db3, keyAtOpen)) or nil
+        local tc2 = (ss and ss.textColor2) or { r = 1, g = 0.2, b = 0.2 }
+        local r, g, b = tonumber(tc2.r) or 1, tonumber(tc2.g) or 0.2, tonumber(tc2.b) or 0.2
+        local function ApplyC2(nr, ng, nb)
+            local s3 = keyAtOpen and select(1, MSWA_GetOrCreateSpellSettings(db3, keyAtOpen)) or nil
+            if s3 then s3.textColor2 = s3.textColor2 or {}; s3.textColor2.r = nr; s3.textColor2.g = ng; s3.textColor2.b = nb end
+            if f.tc2ColorSwatch and MSWA_KeyEquals(MSWA.selectedSpellID, keyAtOpen) then f.tc2ColorSwatch:SetColorTexture(nr, ng, nb, 1) end
+            MSWA_RequestUpdateSpells()
+        end
+        if ColorPickerFrame and ColorPickerFrame.SetupColorPickerAndShow then
+            local function OnChanged() local nr, ng, nb = ColorPickerFrame:GetColorRGB(); if type(nr) == "number" then ApplyC2(nr, ng, nb) end end
+            ColorPickerFrame:SetupColorPickerAndShow({ r=r, g=g, b=b, hasOpacity=false, swatchFunc=OnChanged, func=OnChanged, okayFunc=OnChanged, cancelFunc=function(restore) if type(restore) == "table" then ApplyC2(restore.r or r, restore.g or g, restore.b or b) else ApplyC2(r, g, b) end end })
+        elseif ColorPickerFrame then
+            ColorPickerFrame.hasOpacity = false; ColorPickerFrame.previousValues = { r=r, g=g, b=b }
+            ColorPickerFrame.func = function() ApplyC2(ColorPickerFrame:GetColorRGB()) end
+            ColorPickerFrame.cancelFunc = function(prev) if type(prev) == "table" then ApplyC2(prev.r or r, prev.g or g, prev.b or b) else ApplyC2(r, g, b) end end
+            ColorPickerFrame:SetColorRGB(r, g, b); ColorPickerFrame:Show()
+        end
+    end)
 
     -- Apply logic + hooks (identical to original)
     local function ApplyDisplay() local key = MSWA.selectedSpellID; if not key then return end; local db = MSWA_GetDB(); db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[key] or {}
@@ -2119,6 +2140,57 @@ local function MSWA_CreateOptionsFrame()
         if MSWA.previewMode then f.btnPreview:SetText("|cff00ff00Preview|r"); MSWA_Print("Preview ON") else f.btnPreview:SetText("Preview"); MSWA_Print("Preview OFF.") end
         MSWA_RequestUpdateSpells()
     end)
+
+    local function SyncIDInfoBtn()
+        local db = MSWA_GetDB()
+        if db.showSpellID or db.showIconID then
+            f.btnIDInfo:SetText("|cff00ff00ID Info|r")
+        else
+            f.btnIDInfo:SetText("ID Info")
+        end
+    end
+    f.btnIDInfo:SetScript("OnClick", function(self, button)
+        local db = MSWA_GetDB()
+        if button == "RightButton" then
+            -- Right-click: cycle modes (Both → Spell only → Icon only → Off)
+            if db.showSpellID and db.showIconID then
+                db.showSpellID = true; db.showIconID = false
+                MSWA_Print("Tooltip: Spell/Item ID only")
+            elseif db.showSpellID and not db.showIconID then
+                db.showSpellID = false; db.showIconID = true
+                MSWA_Print("Tooltip: Icon ID only")
+            elseif not db.showSpellID and db.showIconID then
+                db.showSpellID = false; db.showIconID = false
+                MSWA_Print("Tooltip: ID Info OFF")
+            else
+                db.showSpellID = true; db.showIconID = true
+                MSWA_Print("Tooltip: Spell/Item ID + Icon ID")
+            end
+        else
+            -- Left-click: simple toggle both
+            local on = not (db.showSpellID or db.showIconID)
+            db.showSpellID = on; db.showIconID = on
+            if on then MSWA_Print("Tooltip ID Info ON") else MSWA_Print("Tooltip ID Info OFF") end
+        end
+        SyncIDInfoBtn()
+    end)
+    f.btnIDInfo:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    f.btnIDInfo:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("ID Info", 1, 0.82, 0)
+        GameTooltip:AddLine("Left-click: toggle on/off", 1, 1, 1)
+        GameTooltip:AddLine("Right-click: cycle modes", 0.7, 0.7, 0.7)
+        local db = MSWA_GetDB()
+        local status = "Off"
+        if db.showSpellID and db.showIconID then status = "Spell + Icon ID"
+        elseif db.showSpellID then status = "Spell/Item ID only"
+        elseif db.showIconID then status = "Icon ID only" end
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Current: |cffffffff" .. status .. "|r", 1, 0.82, 0)
+        GameTooltip:Show()
+    end)
+    f.btnIDInfo:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    SyncIDInfoBtn()
     f.btnImport:SetScript("OnClick", function() MSWA_OpenImportFrame() end)
     f.btnExport:SetScript("OnClick", function()
         if MSWA.selectedGroupID then MSWA_ExportGroup(MSWA.selectedGroupID); return end
@@ -2137,6 +2209,7 @@ local function MSWA_CreateOptionsFrame()
     f:SetScript("OnShow", function()
         MSWA.selectedSpellID = nil; MSWA.selectedGroupID = nil; MSWA.previewMode = false
         if f.btnPreview then f.btnPreview:SetText("Preview") end
+        SyncIDInfoBtn()
         f.activeTab = "GENERAL"
         if f.tabGeneral then f.tabGeneral:LockHighlight() end; if f.tabDisplay then f.tabDisplay:UnlockHighlight() end; if f.tabGlow then f.tabGlow:UnlockHighlight() end; if f.tabImport then f.tabImport:UnlockHighlight() end
         f:UpdateAuraList(); MSWA_ApplyUIFont()
@@ -2215,7 +2288,18 @@ SlashCmdList["MIDNIGHTSIMPLEWEAKAURAS"] = function(msg)
         if ie then MSWA_Print("None.") end; return
     end
 
-    MSWA_Print("Commands: /msa, /msa move, /msa lock, /msa reset, /msa add <ID>, /msa remove <ID>, /msa additem <ID>, /msa removeitem <ID>, /msa list")
+    if cmd == "id" or cmd == "idinfo" then
+        local on = not (db.showSpellID or db.showIconID)
+        db.showSpellID = on; db.showIconID = on
+        if on then MSWA_Print("Tooltip ID Info ON") else MSWA_Print("Tooltip ID Info OFF") end
+        local optF = MSWA.optionsFrame
+        if optF and optF.btnIDInfo then
+            if on then optF.btnIDInfo:SetText("|cff00ff00ID Info|r") else optF.btnIDInfo:SetText("ID Info") end
+        end
+        return
+    end
+
+    MSWA_Print("Commands: /msa, /msa move, /msa lock, /msa reset, /msa add <ID>, /msa remove <ID>, /msa additem <ID>, /msa removeitem <ID>, /msa list, /msa id")
 end
 
 -----------------------------------------------------------
