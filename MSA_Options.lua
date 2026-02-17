@@ -357,6 +357,38 @@ MSWA_UpdateDetailPanel = function()
         f.grayCooldownCheck:SetChecked((s and s.grayOnCooldown) and true or false)
     end
 
+    -- Sync conditional 2nd text color controls
+    if f.tc2Check then
+        local tc2en = (s and s.textColor2Enabled) and true or false
+        f.tc2Check:SetChecked(tc2en)
+        -- Color swatch
+        if f.tc2ColorSwatch then
+            local tc2 = (s and s.textColor2) or { r = 1, g = 0.2, b = 0.2 }
+            f.tc2ColorSwatch:SetColorTexture(tonumber(tc2.r) or 1, tonumber(tc2.g) or 0.2, tonumber(tc2.b) or 0.2, 1)
+        end
+        -- Condition text
+        local cond = (s and s.textColor2Cond) or "TIMER_BELOW"
+        if f.tc2CondButton then
+            if cond == "TIMER_ABOVE" then
+                f.tc2CondButton:SetText("Timer >= X")
+            else
+                f.tc2CondButton:SetText("Timer <= X")
+            end
+        end
+        -- Value
+        if f.tc2ValueEdit then
+            f.tc2ValueEdit:SetText(tostring((s and s.textColor2Value) or 5))
+        end
+        -- Enable/disable sub-controls
+        local enSub = tc2en
+        if f.tc2ColorBtn then f.tc2ColorBtn[enSub and "Enable" or "Disable"](f.tc2ColorBtn) end
+        if f.tc2CondButton then f.tc2CondButton[enSub and "Enable" or "Disable"](f.tc2CondButton) end
+        if f.tc2ValueEdit then f.tc2ValueEdit[enSub and "Enable" or "Disable"](f.tc2ValueEdit) end
+        if f.tc2ColorLabel then f.tc2ColorLabel:SetAlpha(enSub and 1 or 0.4) end
+        if f.tc2CondLabel then f.tc2CondLabel:SetAlpha(enSub and 1 or 0.4) end
+        if f.tc2ValueLabel then f.tc2ValueLabel:SetAlpha(enSub and 1 or 0.4) end
+    end
+
     -- Sync Auto Buff controls
     if f.autoBuffCheck then
         local isAutoBuff = (s and s.auraMode == "AUTOBUFF") and true or false
@@ -478,6 +510,25 @@ local function MSWA_CreateOptionsFrame()
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving); f:SetScript("OnDragStop", f.StopMovingOrSizing)
 
+    -- Resizable
+    if f.SetResizable then f:SetResizable(true) end
+    if f.SetResizeBounds then
+        f:SetResizeBounds(700, 400, 1200, 800)
+    elseif f.SetMinResize then
+        f:SetMinResize(700, 400); f:SetMaxResize(1200, 800)
+    end
+
+    -- Resize grip (bottom-right corner)
+    local grip = CreateFrame("Button", nil, f)
+    grip:SetSize(16, 16)
+    grip:SetPoint("BOTTOMRIGHT", -4, 4)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    grip:SetScript("OnMouseDown", function(self) f:StartSizing("BOTTOMRIGHT") end)
+    grip:SetScript("OnMouseUp", function(self) f:StopMovingOrSizing() end)
+    f.resizeGrip = grip
+
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     f.title:SetPoint("LEFT", f.TitleBg, "LEFT", 10, 0); f.title:SetText("Midnight Simple Auras")
 
@@ -505,7 +556,15 @@ local function MSWA_CreateOptionsFrame()
     f.btnPreview:SetPoint("LEFT", f.btnGroup, "RIGHT", 6, 0); f.btnPreview:SetText("Preview")
 
     -- Scroll frame + rows
-    local rowHeight, visibleRows = 24, 14
+    local rowHeight = 24
+    local MAX_VISIBLE_ROWS = 28  -- pre-create enough for largest window
+    f.rowHeight = rowHeight
+
+    function f:GetVisibleRows()
+        local h = self.listPanel and self.listPanel:GetHeight() or 336
+        return math.max(4, math.floor((h - 30) / rowHeight))
+    end
+
     local scrollFrame = CreateFrame("ScrollFrame", "MSWA_AuraListScrollFrame", listPanel, "FauxScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", listPanel, "TOPLEFT", 0, -24)
     scrollFrame:SetPoint("BOTTOMRIGHT", listPanel, "BOTTOMRIGHT", -2, 6)
@@ -581,7 +640,7 @@ local function MSWA_CreateOptionsFrame()
     local DOUBLECLICK_THRESHOLD = 0.35
 
     f.rows = {}
-    for i = 1, visibleRows do
+    for i = 1, MAX_VISIBLE_ROWS do
         local row = CreateFrame("Button", "MSWA_AuraRow" .. i, listPanel)
         row:SetSize(282, rowHeight); row:SetPoint("TOPLEFT", 8, -24 - (i - 1) * rowHeight)
         row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
@@ -677,6 +736,7 @@ local function MSWA_CreateOptionsFrame()
         local selectedKey = MSWA.selectedSpellID
         local selectedGroup = MSWA.selectedGroupID
         local total = #entries
+        local visibleRows = self:GetVisibleRows()
         FauxScrollFrame_Update(scrollFrame, total, visibleRows, rowHeight)
         local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
@@ -732,6 +792,16 @@ local function MSWA_CreateOptionsFrame()
                     if selectedKey ~= nil and selectedKey == key then row.selectedTex:Show() end
                 end
             else
+                row.entryType = nil; row.groupID = nil; row.key = nil; row.indent = 0; row.spellID = nil
+                row.icon:SetTexture(nil); row.text:SetText(""); row.selectedTex:Hide()
+                if row.sepTop then row.sepTop:Hide() end; if row.sepBottom then row.sepBottom:Hide() end
+                row:Hide()
+            end
+        end
+        -- Hide extra pre-created rows beyond current visibleRows
+        for i = visibleRows + 1, MAX_VISIBLE_ROWS do
+            local row = self.rows[i]
+            if row then
                 row.entryType = nil; row.groupID = nil; row.key = nil; row.indent = 0; row.spellID = nil
                 row.icon:SetTexture(nil); row.text:SetText(""); row.selectedTex:Hide()
                 if row.sepTop then row.sepTop:Hide() end; if row.sepBottom then row.sepBottom:Hide() end
@@ -1597,6 +1667,108 @@ local function MSWA_CreateOptionsFrame()
         MSWA_RequestUpdateSpells()
     end)
 
+    -- ======= Conditional 2nd Text Color =======
+    local tc2Sep = f.displayPanel:CreateTexture(nil, "ARTWORK")
+    tc2Sep:SetPoint("TOPLEFT", f.grayCooldownCheck, "BOTTOMLEFT", 4, -10)
+    tc2Sep:SetSize(400, 1); tc2Sep:SetColorTexture(1, 1, 1, 0.12)
+
+    f.tc2Check = CreateFrame("CheckButton", nil, f.displayPanel, "ChatConfigCheckButtonTemplate")
+    f.tc2Check:SetPoint("TOPLEFT", tc2Sep, "BOTTOMLEFT", -4, -8)
+    f.tc2Label = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.tc2Label:SetPoint("LEFT", f.tc2Check, "RIGHT", 2, 0)
+    f.tc2Label:SetText("|cffffcc00Conditional text color|r")
+
+    -- 2nd color swatch
+    f.tc2ColorLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.tc2ColorLabel:SetPoint("TOPLEFT", f.tc2Check, "BOTTOMLEFT", 22, -8)
+    f.tc2ColorLabel:SetText("Color:")
+    f.tc2ColorBtn = CreateFrame("Button", nil, f.displayPanel)
+    f.tc2ColorBtn:SetSize(18, 18); f.tc2ColorBtn:SetPoint("LEFT", f.tc2ColorLabel, "RIGHT", 6, 0); f.tc2ColorBtn:EnableMouse(true)
+    f.tc2ColorSwatch = f.tc2ColorBtn:CreateTexture(nil, "ARTWORK"); f.tc2ColorSwatch:SetAllPoints(true); f.tc2ColorSwatch:SetColorTexture(1, 0, 0, 1)
+    local tc2Border = f.tc2ColorBtn:CreateTexture(nil, "BORDER"); tc2Border:SetPoint("TOPLEFT", f.tc2ColorBtn, "TOPLEFT", -1, 1); tc2Border:SetPoint("BOTTOMRIGHT", f.tc2ColorBtn, "BOTTOMRIGHT", 1, -1); tc2Border:SetColorTexture(0, 0, 0, 1)
+
+    -- Condition button (cycles: TIMER_BELOW → TIMER_ABOVE)
+    f.tc2CondLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.tc2CondLabel:SetPoint("LEFT", f.tc2ColorBtn, "RIGHT", 16, 0)
+    f.tc2CondLabel:SetText("When:")
+    f.tc2CondButton = CreateFrame("Button", nil, f.displayPanel, "UIPanelButtonTemplate")
+    f.tc2CondButton:SetSize(90, 20); f.tc2CondButton:SetPoint("LEFT", f.tc2CondLabel, "RIGHT", 4, 0)
+
+    -- Threshold value (editbox right of button, then "sec" label)
+    f.tc2ValueEdit = CreateFrame("EditBox", nil, f.displayPanel, "InputBoxTemplate")
+    f.tc2ValueEdit:SetSize(40, 20); f.tc2ValueEdit:SetPoint("LEFT", f.tc2CondButton, "RIGHT", 6, 0)
+    f.tc2ValueEdit:SetAutoFocus(false)
+    f.tc2ValueLabel = f.displayPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.tc2ValueLabel:SetPoint("LEFT", f.tc2ValueEdit, "RIGHT", 4, 0)
+    f.tc2ValueLabel:SetText("sec")
+
+    -- Helper: update condition button text
+    local function UpdateTC2CondText(cond)
+        if not f.tc2CondButton then return end
+        if cond == "TIMER_ABOVE" then
+            f.tc2CondButton:SetText("Timer >= X")
+        else
+            f.tc2CondButton:SetText("Timer <= X")
+        end
+    end
+
+    -- Enable checkbox
+    f.tc2Check:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.textColor2Enabled = self:GetChecked() and true or nil
+        if s2.textColor2Enabled and not s2.textColor2 then
+            s2.textColor2 = { r = 1, g = 0.2, b = 0.2 }
+        end
+        MSWA_RequestUpdateSpells(); MSWA_UpdateDetailPanel()
+    end)
+
+    -- Condition cycle
+    f.tc2CondButton:SetScript("OnClick", function()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local cur = s2.textColor2Cond or "TIMER_BELOW"
+        s2.textColor2Cond = (cur == "TIMER_BELOW") and "TIMER_ABOVE" or "TIMER_BELOW"
+        UpdateTC2CondText(s2.textColor2Cond)
+        MSWA_RequestUpdateSpells()
+    end)
+
+    -- Value edit
+    local function ApplyTC2Value()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local v = tonumber(f.tc2ValueEdit:GetText())
+        if v and v >= 0 then s2.textColor2Value = v end
+        MSWA_RequestUpdateSpells()
+    end
+    f.tc2ValueEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyTC2Value() end)
+    f.tc2ValueEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    f.tc2ValueEdit:SetScript("OnEditFocusLost", function() ApplyTC2Value() end)
+
+    -- Color picker for 2nd color
+    f.tc2ColorBtn:SetScript("OnClick", function()
+        local keyAtOpen = MSWA.selectedSpellID; if not keyAtOpen then return end
+        local db3 = MSWA_GetDB()
+        local ss = keyAtOpen and select(1, MSWA_GetSpellSettings(db3, keyAtOpen)) or nil
+        local tc2 = (ss and ss.textColor2) or { r = 1, g = 0.2, b = 0.2 }
+        local r, g, b = tonumber(tc2.r) or 1, tonumber(tc2.g) or 0.2, tonumber(tc2.b) or 0.2
+        local function ApplyC2(nr, ng, nb)
+            local s3 = keyAtOpen and select(1, MSWA_GetOrCreateSpellSettings(db3, keyAtOpen)) or nil
+            if s3 then s3.textColor2 = s3.textColor2 or {}; s3.textColor2.r = nr; s3.textColor2.g = ng; s3.textColor2.b = nb end
+            if f.tc2ColorSwatch and MSWA_KeyEquals(MSWA.selectedSpellID, keyAtOpen) then f.tc2ColorSwatch:SetColorTexture(nr, ng, nb, 1) end
+            MSWA_RequestUpdateSpells()
+        end
+        if ColorPickerFrame and ColorPickerFrame.SetupColorPickerAndShow then
+            local function OnChanged() local nr, ng, nb = ColorPickerFrame:GetColorRGB(); if type(nr) == "number" then ApplyC2(nr, ng, nb) end end
+            ColorPickerFrame:SetupColorPickerAndShow({ r=r, g=g, b=b, hasOpacity=false, swatchFunc=OnChanged, func=OnChanged, okayFunc=OnChanged, cancelFunc=function(restore) if type(restore) == "table" then ApplyC2(restore.r or r, restore.g or g, restore.b or b) else ApplyC2(r, g, b) end end })
+        elseif ColorPickerFrame then
+            ColorPickerFrame.hasOpacity = false; ColorPickerFrame.previousValues = { r=r, g=g, b=b }
+            ColorPickerFrame.func = function() ApplyC2(ColorPickerFrame:GetColorRGB()) end
+            ColorPickerFrame.cancelFunc = function(prev) if type(prev) == "table" then ApplyC2(prev.r or r, prev.g or g, prev.b or b) else ApplyC2(r, g, b) end end
+            ColorPickerFrame:SetColorRGB(r, g, b); ColorPickerFrame:Show()
+        end
+    end)
+
     -- Apply logic + hooks (identical to original)
     local function ApplyDisplay() local key = MSWA.selectedSpellID; if not key then return end; local db = MSWA_GetDB(); db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[key] or {}
         local x = tonumber(f.detailX:GetText() or "") or 0; local y = tonumber(f.detailY:GetText() or "") or 0
@@ -1722,7 +1894,12 @@ local function MSWA_CreateOptionsFrame()
         MSWA_ExportAura(key)
     end)
 
-    -- OnShow / OnHide
+    -- OnShow / OnHide / OnSizeChanged
+    f:SetScript("OnSizeChanged", function(self)
+        if self:IsShown() and self.UpdateAuraList then
+            self:UpdateAuraList()
+        end
+    end)
     f:SetScript("OnShow", function()
         MSWA.selectedSpellID = nil; MSWA.selectedGroupID = nil; MSWA.previewMode = false
         if f.btnPreview then f.btnPreview:SetText("Preview") end

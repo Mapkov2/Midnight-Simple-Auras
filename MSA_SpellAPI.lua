@@ -241,3 +241,84 @@ function MSWA_UpdateBuffVisual(btn, key)
     btn.count:SetText("")
     btn.count:Hide()
 end
+
+-----------------------------------------------------------
+-- Conditional text color (2nd color based on timer)
+-----------------------------------------------------------
+
+local function FindCooldownText(cd)
+    if not cd then return nil end
+    -- Try common methods to get the cooldown frame's countdown FontString
+    if cd.GetRegions then
+        local regions = { cd:GetRegions() }
+        for _, region in ipairs(regions) do
+            if region and region.IsObjectType and region:IsObjectType("FontString") then
+                return region
+            end
+        end
+    end
+    -- Check named children
+    if cd.GetChildren then
+        local children = { cd:GetChildren() }
+        for _, child in ipairs(children) do
+            if child and child.GetRegions then
+                local regions = { child:GetRegions() }
+                for _, region in ipairs(regions) do
+                    if region and region.IsObjectType and region:IsObjectType("FontString") then
+                        return region
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function MSWA_ApplyConditionalTextColor(btn, key, remaining, isOnCooldown)
+    if not btn then return end
+
+    local db = MSWA_GetDB()
+    local s = (key ~= nil) and select(1, MSWA_GetSpellSettings(db, key)) or nil
+
+    -- Get base text color (same logic as MSWA_GetTextStyleForKey)
+    local baseTC = (s and s.textColor) or db.textColor or { r = 1, g = 1, b = 1 }
+    local br = tonumber(baseTC.r) or 1
+    local bg = tonumber(baseTC.g) or 1
+    local bb = tonumber(baseTC.b) or 1
+
+    -- Determine final color: base or conditional 2nd color
+    local fr, fg, fb = br, bg, bb
+    local condActive = false
+
+    if s and s.textColor2Enabled and s.textColor2 then
+        local cond = s.textColor2Cond or "TIMER_BELOW"
+        local val  = tonumber(s.textColor2Value) or 5
+        remaining  = remaining or 0
+        isOnCooldown = isOnCooldown or false
+
+        if cond == "TIMER_BELOW" then
+            condActive = isOnCooldown and remaining <= val and remaining > 0
+        elseif cond == "TIMER_ABOVE" then
+            condActive = isOnCooldown and remaining >= val
+        end
+
+        if condActive then
+            fr = tonumber(s.textColor2.r) or 1
+            fg = tonumber(s.textColor2.g) or 0
+            fb = tonumber(s.textColor2.b) or 0
+        end
+    end
+
+    -- Apply to btn.count (stack/charge text)
+    if btn.count and btn.count.SetTextColor then
+        btn.count:SetTextColor(fr, fg, fb, 1)
+    end
+
+    -- Apply to Blizzard cooldown countdown text
+    if btn.cooldown then
+        local cdText = FindCooldownText(btn.cooldown)
+        if cdText and cdText.SetTextColor then
+            cdText:SetTextColor(fr, fg, fb, 1)
+        end
+    end
+end

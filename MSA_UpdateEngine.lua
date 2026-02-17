@@ -35,6 +35,7 @@ local MSWA_ReskinMasque          = MSWA_ReskinMasque
 local MSWA_TryComputeExpirationFromRemaining = MSWA_TryComputeExpirationFromRemaining
 local MSWA_UpdateGlow            = MSWA_UpdateGlow
 local MSWA_StopGlow              = MSWA_StopGlow
+local MSWA_ApplyConditionalTextColor = MSWA_ApplyConditionalTextColor
 
 -----------------------------------------------------------
 -- Constants
@@ -365,11 +366,15 @@ local function MSWA_UpdateSpells()
 
     -----------------------------------------------------------
     -- 3) Glow pass: apply/remove glow on all visible buttons
+    --    + conditional text color
     -----------------------------------------------------------
     for i = 1, index - 1 do
         local btn = MSWA.icons[i]
         if btn and btn:IsShown() and btn.spellID then
-            MSWA_UpdateGlow(btn, btn.spellID, btn._msaGlowRemaining or 0, btn._msaGlowOnCD or false)
+            local rem = btn._msaGlowRemaining or 0
+            local onCD = btn._msaGlowOnCD or false
+            MSWA_UpdateGlow(btn, btn.spellID, rem, onCD)
+            MSWA_ApplyConditionalTextColor(btn, btn.spellID, rem, onCD)
         end
     end
 
