@@ -64,6 +64,14 @@ function MSWA_GetDB()
     db.customNames   = db.customNames or {}
 
     if db.textFontSize == nil then db.textFontSize = 12 end
+    -- Global font defaults (used when an aura has no per-aura override)
+    if db.fontKey == nil then db.fontKey = "DEFAULT" end
+    if db.stackFontKey == nil then db.stackFontKey = nil end -- nil => follow fontKey
+    if db.stackFontSize == nil then db.stackFontSize = 12 end
+    if db.stackPoint == nil then db.stackPoint = "BOTTOMRIGHT" end
+    if db.stackOffsetX == nil then db.stackOffsetX = 0 end
+    if db.stackOffsetY == nil then db.stackOffsetY = 0 end
+    if db.stackColor == nil then db.stackColor = { r = 1, g = 1, b = 1 } end
     if not db.textColor then
         db.textColor = { r = 1, g = 1, b = 1 }
     else

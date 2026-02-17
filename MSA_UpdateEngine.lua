@@ -132,6 +132,7 @@ local function HideButton(btn)
     btn.icon:SetTexture(nil)
     btn._msaCachedKey = nil
     MSWA_ClearCooldownFrame(btn.cooldown)
+    if btn.cooldownText then btn.cooldownText:SetText(""); btn.cooldownText:Hide() end
     MSWA_StopGlow(btn)
     btn.spellID = nil
 end
@@ -247,6 +248,12 @@ local function MSWA_UpdateSpells()
                             if showBuff then
                                 PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
                                 MSWA_ApplyCooldownFrame(btn.cooldown, timerStart, buffDur, 1)
+                                -- Custom cooldown text (styleable)
+                                if MSWA_UpdateCooldownText then
+                                    local glowRem = buffDur - (GetTime() - timerStart)
+                                    if glowRem < 0 then glowRem = 0 end
+                                    MSWA_UpdateCooldownText(btn, glowRem)
+                                end
                                 btn.icon:SetDesaturated(false)
                                 btn:SetAlpha(ComputeAlpha(s, true, inCombat))
                                 ClearStackAndCount(btn)
@@ -282,15 +289,25 @@ local function MSWA_UpdateSpells()
                             local cdInfo = C_Spell.GetSpellCooldown(spellID)
                             if cdInfo then
                                 local exp = cdInfo.expirationTime
+                                local remForText = nil
                                 if hasGetCDRemaining then
                                     local rem = C_Spell.GetSpellCooldownRemaining(spellID)
                                     if type(rem) == "number" then
+                                        remForText = rem
                                         exp = GetTime() + rem
                                     end
                                 end
                                 MSWA_ApplyCooldownFrame(btn.cooldown, cdInfo.startTime, cdInfo.duration, cdInfo.modRate, exp)
+                                if MSWA_UpdateCooldownText then
+                                    if remForText == nil and cdInfo.startTime and cdInfo.duration then
+                                        local ok, rem2 = pcall(function() return (cdInfo.startTime + cdInfo.duration) - GetTime() end)
+                                        if ok and type(rem2) == "number" then remForText = rem2 end
+                                    end
+                                    MSWA_UpdateCooldownText(btn, remForText)
+                                end
                             else
                                 MSWA_ClearCooldownFrame(btn.cooldown)
+                                if MSWA_UpdateCooldownText then MSWA_UpdateCooldownText(btn, nil) end
                             end
 
                             MSWA_UpdateBuffVisual_Fast(btn, s, spellID, false, nil)
@@ -372,6 +389,11 @@ local function MSWA_UpdateSpells()
                             if showBuff then
                                 PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
                                 MSWA_ApplyCooldownFrame(btn.cooldown, timerStart, buffDur, 1)
+                                if MSWA_UpdateCooldownText then
+                                    local glowRem = buffDur - (GetTime() - timerStart)
+                                    if glowRem < 0 then glowRem = 0 end
+                                    MSWA_UpdateCooldownText(btn, glowRem)
+                                end
                                 btn.icon:SetDesaturated(false)
                                 btn:SetAlpha(ComputeAlpha(s, true, inCombat))
                                 ClearStackAndCount(btn)
@@ -391,6 +413,7 @@ local function MSWA_UpdateSpells()
                             elseif previewMode or key == selectedKey then
                                 PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
                                 MSWA_ClearCooldownFrame(btn.cooldown)
+                                if MSWA_UpdateCooldownText then MSWA_UpdateCooldownText(btn, nil) end
                                 btn.icon:SetDesaturated(false)
                                 btn:SetAlpha(ComputeAlpha(s, false, inCombat))
                                 ClearStackAndCount(btn)
@@ -406,6 +429,14 @@ local function MSWA_UpdateSpells()
 
                             local start, duration, enable, modRate = GetItemCooldown(itemID)
                             MSWA_ApplyCooldownFrame(btn.cooldown, start, duration, modRate)
+                            if MSWA_UpdateCooldownText then
+                                local remForText = nil
+                                if start and duration then
+                                    local ok, rem2 = pcall(function() return (start + duration) - GetTime() end)
+                                    if ok and type(rem2) == "number" then remForText = rem2 end
+                                end
+                                MSWA_UpdateCooldownText(btn, remForText)
+                            end
 
                             MSWA_UpdateBuffVisual_Fast(btn, s, nil, true, itemID)
 

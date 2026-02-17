@@ -533,7 +533,7 @@ function MSWA_InitFontDropdown()
                 s2 = db.spellSettings[auraKey]
                 if not s2 and type(auraKey) ~= "string" then s2 = db.spellSettings[tostring(auraKey)] end
             end
-            local currentKey = (s2 and s2.textFontKey) or "DEFAULT"
+            local currentKey = (s2 and s2.textFontKey) or (db and db.fontKey) or "DEFAULT"
 
             for _, data in ipairs(MSWA.fontChoices or {}) do
                 local info = UIDropDownMenu_CreateInfo()
@@ -542,13 +542,17 @@ function MSWA_InitFontDropdown()
                 info.checked = (data.key == currentKey)
                 info.func = function()
                     local key = MSWA.selectedSpellID
-                    if not key then return end
                     local db2 = MSWA_GetDB()
-                    db2.spellSettings = db2.spellSettings or {}
-                    local t = db2.spellSettings
-                    local ss = t[key] or t[tostring(key)]
-                    if not ss then ss = {}; t[key] = ss end
-                    if data.key == "DEFAULT" then ss.textFontKey = nil else ss.textFontKey = data.key end
+                    if key then
+                        db2.spellSettings = db2.spellSettings or {}
+                        local t = db2.spellSettings
+                        local ss = t[key] or t[tostring(key)]
+                        if not ss then ss = {}; t[key] = ss end
+                        if data.key == "DEFAULT" then ss.textFontKey = nil else ss.textFontKey = data.key end
+                    else
+                        -- No aura selected => set global default
+                        db2.fontKey = (data.key == "DEFAULT") and "DEFAULT" or data.key
+                    end
                     UIDropDownMenu_SetSelectedValue(f.fontDrop, data.key)
                     UIDropDownMenu_SetText(f.fontDrop, data.label or data.key)
                     if f.fontPreview and MSWA.fontLookup then
@@ -557,7 +561,7 @@ function MSWA_InitFontDropdown()
                             f.fontPreview:SetFontObject(GameFontNormalSmall)
                         else f.fontPreview:SetFont(fontPath, 12, "") end
                     end
-                    MSWA_RequestUpdateSpells()
+                    if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
                 end
                 UIDropDownMenu_AddButton(info, level)
             end
@@ -567,16 +571,10 @@ function MSWA_InitFontDropdown()
 
     local db = MSWA_GetDB()
     local auraKey = MSWA.selectedSpellID
-    if not auraKey then
-        if UIDropDownMenu_SetSelectedValue then UIDropDownMenu_SetSelectedValue(f.fontDrop, "DEFAULT") end
-        if UIDropDownMenu_SetText then UIDropDownMenu_SetText(f.fontDrop, "Default (Blizzard)") end
-        if UIDropDownMenu_DisableDropDown then UIDropDownMenu_DisableDropDown(f.fontDrop) end
-        return
-    end
     if UIDropDownMenu_EnableDropDown then UIDropDownMenu_EnableDropDown(f.fontDrop) end
 
-    local ss = select(1, MSWA_GetSpellSettings(db, auraKey)) or {}
-    local fontKey = (ss and ss.textFontKey) or "DEFAULT"
+    local ss = auraKey and (select(1, MSWA_GetSpellSettings(db, auraKey)) or {}) or nil
+    local fontKey = (ss and ss.textFontKey) or (db and db.fontKey) or "DEFAULT"
     local label = "Default (Blizzard)"
     for _, data in ipairs(MSWA.fontChoices or {}) do
         if data.key == fontKey then label = data.label or data.key; break end
@@ -2021,16 +2019,22 @@ local function MSWA_CreateOptionsFrame()
             UIDropDownMenu_Initialize(f.stackFontDrop, function(self, level)
                 local db = MSWA_GetDB(); local auraKey = MSWA.selectedSpellID
                 local s2 = auraKey and select(1, MSWA_GetSpellSettings(db, auraKey)) or nil
-                local currentKey = (s2 and s2.stackFontKey) or "DEFAULT"
+                local currentKey = (s2 and s2.stackFontKey) or (db and db.stackFontKey) or (db and db.fontKey) or "DEFAULT"
                 for _, data in ipairs(MSWA.fontChoices or {}) do
                     local info = UIDropDownMenu_CreateInfo()
                     info.text = data.label or data.key; info.value = data.key; info.checked = (data.key == currentKey)
                     info.func = function()
-                        local key = MSWA.selectedSpellID; if not key then return end
-                        local ss = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
-                        if data.key == "DEFAULT" then ss.stackFontKey = nil else ss.stackFontKey = data.key end
+                        local key = MSWA.selectedSpellID
+                        local db2 = MSWA_GetDB()
+                        if key then
+                            local ss = select(1, MSWA_GetOrCreateSpellSettings(db2, key))
+                            if data.key == "DEFAULT" then ss.stackFontKey = nil else ss.stackFontKey = data.key end
+                        else
+                            -- No aura selected => set global stack default (nil follows global fontKey)
+                            db2.stackFontKey = (data.key == "DEFAULT") and nil or data.key
+                        end
                         UIDropDownMenu_SetText(f.stackFontDrop, data.label or data.key); CloseDropDownMenus()
-                        MSWA_RequestUpdateSpells()
+                        if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
                     end
                     UIDropDownMenu_AddButton(info, level)
                 end
@@ -2039,7 +2043,7 @@ local function MSWA_CreateOptionsFrame()
         end
         local db = MSWA_GetDB(); local auraKey = MSWA.selectedSpellID
         local ss = auraKey and select(1, MSWA_GetSpellSettings(db, auraKey)) or nil
-        local fontKey = (ss and ss.stackFontKey) or "DEFAULT"
+        local fontKey = (ss and ss.stackFontKey) or (db and db.stackFontKey) or (db and db.fontKey) or "DEFAULT"
         local label = "Default (Blizzard)"
         for _, data in ipairs(MSWA.fontChoices or {}) do
             if data.key == fontKey then label = data.label or data.key; break end
@@ -2050,26 +2054,57 @@ local function MSWA_CreateOptionsFrame()
     -- Stack size +/-
     local function ClampStackSize(v) v = tonumber(v) or 12; if v < 6 then v = 6 end; if v > 48 then v = 48 end; return v end
     local function ApplyStackSize()
-        local key = MSWA.selectedSpellID; if not key then return end
-        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local key = MSWA.selectedSpellID
+        local db = MSWA_GetDB()
         local v = ClampStackSize(f.stackSizeEdit and f.stackSizeEdit:GetText())
-        s2.stackFontSize = v; if f.stackSizeEdit then f.stackSizeEdit:SetText(tostring(v)) end; MSWA_RequestUpdateSpells()
+        if key then
+            local s2 = select(1, MSWA_GetOrCreateSpellSettings(db, key))
+            s2.stackFontSize = v
+        else
+            db.stackFontSize = v
+        end
+        if f.stackSizeEdit then f.stackSizeEdit:SetText(tostring(v)) end
+        if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
     end
     if f.stackSizeEdit then
         f.stackSizeEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyStackSize() end)
         f.stackSizeEdit:SetScript("OnEditFocusLost", function() ApplyStackSize() end)
     end
     f.stackSizeMinus:SetScript("OnClick", function()
-        local key = MSWA.selectedSpellID; if not key then return end
-        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
-        local v = ClampStackSize((f.stackSizeEdit and f.stackSizeEdit:GetText()) or (s2.stackFontSize or 12)) - 1; v = ClampStackSize(v)
-        s2.stackFontSize = v; if f.stackSizeEdit then f.stackSizeEdit:SetText(tostring(v)) end; MSWA_RequestUpdateSpells()
+        local key = MSWA.selectedSpellID
+        local db = MSWA_GetDB()
+        local cur = db.stackFontSize or 12
+        if key then
+            local s2 = select(1, MSWA_GetOrCreateSpellSettings(db, key))
+            cur = s2.stackFontSize or cur
+        end
+        local v = ClampStackSize((f.stackSizeEdit and f.stackSizeEdit:GetText()) or cur) - 1; v = ClampStackSize(v)
+        if key then
+            local s2 = select(1, MSWA_GetOrCreateSpellSettings(db, key))
+            s2.stackFontSize = v
+        else
+            db.stackFontSize = v
+        end
+        if f.stackSizeEdit then f.stackSizeEdit:SetText(tostring(v)) end
+        if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
     end)
     f.stackSizePlus:SetScript("OnClick", function()
-        local key = MSWA.selectedSpellID; if not key then return end
-        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
-        local v = ClampStackSize((f.stackSizeEdit and f.stackSizeEdit:GetText()) or (s2.stackFontSize or 12)) + 1; v = ClampStackSize(v)
-        s2.stackFontSize = v; if f.stackSizeEdit then f.stackSizeEdit:SetText(tostring(v)) end; MSWA_RequestUpdateSpells()
+        local key = MSWA.selectedSpellID
+        local db = MSWA_GetDB()
+        local cur = db.stackFontSize or 12
+        if key then
+            local s2 = select(1, MSWA_GetOrCreateSpellSettings(db, key))
+            cur = s2.stackFontSize or cur
+        end
+        local v = ClampStackSize((f.stackSizeEdit and f.stackSizeEdit:GetText()) or cur) + 1; v = ClampStackSize(v)
+        if key then
+            local s2 = select(1, MSWA_GetOrCreateSpellSettings(db, key))
+            s2.stackFontSize = v
+        else
+            db.stackFontSize = v
+        end
+        if f.stackSizeEdit then f.stackSizeEdit:SetText(tostring(v)) end
+        if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
     end)
 
     -- Stack pos dropdown
@@ -2078,10 +2113,17 @@ local function MSWA_CreateOptionsFrame()
         UIDropDownMenu_Initialize(f.stackPosDrop, function(self, level)
             local db = MSWA_GetDB(); local key = MSWA.selectedSpellID
             local s2 = key and select(1, MSWA_GetSpellSettings(db, key)) or nil
-            local cur = (s2 and s2.stackPoint) or "BOTTOMRIGHT"
+            local cur = (s2 and s2.stackPoint) or (db and db.stackPoint) or "BOTTOMRIGHT"
             for _, point in ipairs({"BOTTOMRIGHT","BOTTOMLEFT","TOPRIGHT","TOPLEFT","CENTER"}) do
                 local info = UIDropDownMenu_CreateInfo(); info.text = MSWA_GetTextPosLabel(point); info.checked = (tostring(cur) == tostring(point))
-                info.func = function() local ss = select(1, MSWA_GetOrCreateSpellSettings(db, key)); ss.stackPoint = point; UIDropDownMenu_SetText(f.stackPosDrop, MSWA_GetTextPosLabel(point)); CloseDropDownMenus(); MSWA_RequestUpdateSpells() end
+                info.func = function()
+                    if key then
+                        local ss = select(1, MSWA_GetOrCreateSpellSettings(db, key)); ss.stackPoint = point
+                    else
+                        db.stackPoint = point
+                    end
+                    UIDropDownMenu_SetText(f.stackPosDrop, MSWA_GetTextPosLabel(point)); CloseDropDownMenus(); if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
+                end
                 UIDropDownMenu_AddButton(info, level)
             end
         end)
@@ -2089,16 +2131,20 @@ local function MSWA_CreateOptionsFrame()
 
     -- Stack color picker
     f.stackColorBtn:SetScript("OnClick", function()
-        local keyAtOpen = MSWA.selectedSpellID; if not keyAtOpen then return end
+        local keyAtOpen = MSWA.selectedSpellID
         local db3 = MSWA_GetDB()
         local ss = keyAtOpen and select(1, MSWA_GetSpellSettings(db3, keyAtOpen)) or nil
-        local tc = (ss and ss.stackColor) or { r = 1, g = 1, b = 1 }
+        local tc = (ss and ss.stackColor) or (db3 and db3.stackColor) or { r = 1, g = 1, b = 1 }
         local r, g, b = tonumber(tc.r) or 1, tonumber(tc.g) or 1, tonumber(tc.b) or 1
         local function ApplySC(nr, ng, nb)
-            local s3 = keyAtOpen and select(1, MSWA_GetOrCreateSpellSettings(db3, keyAtOpen)) or nil
-            if s3 then s3.stackColor = s3.stackColor or {}; s3.stackColor.r = nr; s3.stackColor.g = ng; s3.stackColor.b = nb end
+            if keyAtOpen then
+                local s3 = select(1, MSWA_GetOrCreateSpellSettings(db3, keyAtOpen))
+                if s3 then s3.stackColor = s3.stackColor or {}; s3.stackColor.r = nr; s3.stackColor.g = ng; s3.stackColor.b = nb end
+            else
+                db3.stackColor = db3.stackColor or {}; db3.stackColor.r = nr; db3.stackColor.g = ng; db3.stackColor.b = nb
+            end
             if f.stackColorSwatch and MSWA_KeyEquals(MSWA.selectedSpellID, keyAtOpen) then f.stackColorSwatch:SetColorTexture(nr, ng, nb, 1) end
-            MSWA_RequestUpdateSpells()
+            if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
         end
         if ColorPickerFrame and ColorPickerFrame.SetupColorPickerAndShow then
             local function OnChanged() local nr, ng, nb = ColorPickerFrame:GetColorRGB(); if type(nr) == "number" then ApplySC(nr, ng, nb) end end
@@ -2113,11 +2159,19 @@ local function MSWA_CreateOptionsFrame()
 
     -- Stack offset apply
     local function ApplyStackOffset()
-        local key = MSWA.selectedSpellID; if not key then return end
-        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
-        s2.stackOffsetX = tonumber(f.stackOffXEdit:GetText()) or 0
-        s2.stackOffsetY = tonumber(f.stackOffYEdit:GetText()) or 0
-        MSWA_RequestUpdateSpells()
+        local db = MSWA_GetDB()
+        local key = MSWA.selectedSpellID
+        local ox = tonumber(f.stackOffXEdit and f.stackOffXEdit:GetText()) or 0
+        local oy = tonumber(f.stackOffYEdit and f.stackOffYEdit:GetText()) or 0
+        if key then
+            local s2 = select(1, MSWA_GetOrCreateSpellSettings(db, key))
+            s2.stackOffsetX = ox
+            s2.stackOffsetY = oy
+        else
+            db.stackOffsetX = ox
+            db.stackOffsetY = oy
+        end
+        if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
     end
     if f.stackOffXEdit then
         f.stackOffXEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyStackOffset() end)
@@ -2250,16 +2304,16 @@ local function MSWA_CreateOptionsFrame()
     local function ClampTextSize(v) v = tonumber(v) or 12; if v < 6 then v = 6 end; if v > 48 then v = 48 end; return v end
     local function ApplyTextSize() local db = MSWA_GetDB(); local key = MSWA.selectedSpellID; local s = key and select(1, MSWA_GetOrCreateSpellSettings(db, key)) or nil
         local cur = (s and s.textFontSize) or db.textFontSize; local v = ClampTextSize(f.textSizeEdit and f.textSizeEdit:GetText() or cur)
-        if s then s.textFontSize = v else db.textFontSize = v end; if f.textSizeEdit then f.textSizeEdit:SetText(tostring(v)) end; MSWA_RequestUpdateSpells()
+        if s then s.textFontSize = v else db.textFontSize = v end; if f.textSizeEdit then f.textSizeEdit:SetText(tostring(v)) end; if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
     end
     HookBox(f.textSizeEdit, ApplyTextSize)
     f.textSizeMinus:SetScript("OnClick", function() local db = MSWA_GetDB(); local key = MSWA.selectedSpellID; local s = key and select(1, MSWA_GetOrCreateSpellSettings(db, key)) or nil
         local cur = (s and s.textFontSize) or db.textFontSize; local v = ClampTextSize((f.textSizeEdit and f.textSizeEdit:GetText()) or cur) - 1; v = ClampTextSize(v)
-        if s then s.textFontSize = v else db.textFontSize = v end; if f.textSizeEdit then f.textSizeEdit:SetText(tostring(v)) end; MSWA_RequestUpdateSpells()
+        if s then s.textFontSize = v else db.textFontSize = v end; if f.textSizeEdit then f.textSizeEdit:SetText(tostring(v)) end; if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
     end)
     f.textSizePlus:SetScript("OnClick", function() local db = MSWA_GetDB(); local key = MSWA.selectedSpellID; local s = key and select(1, MSWA_GetOrCreateSpellSettings(db, key)) or nil
         local cur = (s and s.textFontSize) or db.textFontSize; local v = ClampTextSize((f.textSizeEdit and f.textSizeEdit:GetText()) or cur) + 1; v = ClampTextSize(v)
-        if s then s.textFontSize = v else db.textFontSize = v end; if f.textSizeEdit then f.textSizeEdit:SetText(tostring(v)) end; MSWA_RequestUpdateSpells()
+        if s then s.textFontSize = v else db.textFontSize = v end; if f.textSizeEdit then f.textSizeEdit:SetText(tostring(v)) end; if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
     end)
 
     -- Text pos dropdown
@@ -2268,7 +2322,14 @@ local function MSWA_CreateOptionsFrame()
         UIDropDownMenu_Initialize(f.textPosDrop, function(self, level) local db = MSWA_GetDB(); local key = MSWA.selectedSpellID; local s = key and select(1, MSWA_GetSpellSettings(db, key)) or nil; local cur = (s and s.textPoint) or db.textPoint or "BOTTOMRIGHT"
             for _, point in ipairs({"BOTTOMRIGHT","BOTTOMLEFT","TOPRIGHT","TOPLEFT","CENTER"}) do
                 local info = UIDropDownMenu_CreateInfo(); info.text = MSWA_GetTextPosLabel(point); info.checked = (tostring(cur) == tostring(point))
-                info.func = function() local s2 = select(1, MSWA_GetOrCreateSpellSettings(db, key)); s2.textPoint = point; UIDropDownMenu_SetText(f.textPosDrop, MSWA_GetTextPosLabel(point)); CloseDropDownMenus(); MSWA_RequestUpdateSpells() end
+                info.func = function()
+                    if key then
+                        local s2 = select(1, MSWA_GetOrCreateSpellSettings(db, key)); s2.textPoint = point
+                    else
+                        db.textPoint = point
+                    end
+                    UIDropDownMenu_SetText(f.textPosDrop, MSWA_GetTextPosLabel(point)); CloseDropDownMenus(); if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
+                end
                 UIDropDownMenu_AddButton(info, level)
             end
         end)

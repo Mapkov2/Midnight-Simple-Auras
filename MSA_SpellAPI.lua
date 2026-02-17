@@ -265,9 +265,17 @@ end
 
 -- Inline text style: no MSWA_GetDB, no MSWA_GetSpellSettings
 function MSWA_ApplyTextStyle(btn, db, s)
-    local count = btn.count
+    -- IMPORTANT:
+    -- The built-in Cooldown widget numbers are NOT styleable reliably.
+    -- We use a dedicated FontString (btn.cooldownText) for cooldown text.
+    -- Fallback to btn.count for legacy/compat.
+    local count = (btn and (btn.cooldownText or btn.count))
     if not count then return end
-    local path = MSWA_GetFontPathFromKey((s and s.textFontKey) or "DEFAULT")
+    -- Font key resolution: per-aura override -> global -> DEFAULT
+    local fontKey = (s and s.textFontKey) or (db and db.fontKey) or "DEFAULT"
+    local path = MSWA_GetFontPathFromKey(fontKey)
+    -- Robust fallback: if for any reason Fetch/GetFontPath fails, reuse current font path
+    if not path and count.GetFont then path = select(1, count:GetFont()) end
     local size = tonumber((s and s.textFontSize) or (db and db.textFontSize) or 12) or 12
     if size < 6 then size = 6 elseif size > 48 then size = 48 end
     local tc = (s and s.textColor) or (db and db.textColor)
@@ -281,20 +289,85 @@ function MSWA_ApplyTextStyle(btn, db, s)
     count:SetPoint(point, btn, point, off[1], off[2])
 end
 
+-----------------------------------------------------------
+-- Cooldown text (custom FontString) — lightweight + live
+-----------------------------------------------------------
+
+local function _MSWA_FormatCooldownShort(sec)
+    -- Keep formatting secret-safe: comparisons guarded.
+    if sec == nil then return nil end
+
+    local ok, isNum = pcall(function() return type(sec) == "number" end)
+    if not ok or not isNum then
+        local ok2, s = pcall(tostring, sec)
+        if ok2 and type(s) == "string" then return s end
+        return nil
+    end
+
+    if sec < 0 then sec = 0 end
+
+    if sec >= 3600 then
+        local h = math.floor(sec / 3600 + 0.5)
+        return tostring(h) .. "h"
+    end
+    if sec >= 60 then
+        local m = math.floor(sec / 60 + 0.5)
+        return tostring(m) .. "m"
+    end
+    if sec >= 10 then
+        return tostring(math.floor(sec + 0.5))
+    end
+    -- < 10s: show 1 decimal
+    local v = math.floor(sec * 10 + 0.5) / 10
+    return tostring(v)
+end
+
+function MSWA_UpdateCooldownText(btn, remaining)
+    if not btn then return end
+    local fs = btn.cooldownText or btn.count
+    if not fs then return end
+
+    local txt = nil
+    if remaining ~= nil then
+        local ok, shouldShow = pcall(function() return remaining > 0 end)
+        if ok and shouldShow then
+            txt = _MSWA_FormatCooldownShort(remaining)
+        end
+    end
+
+    if txt and txt ~= "" then
+        if btn._mswaLastCDText ~= txt then
+            btn._mswaLastCDText = txt
+            fs:SetText(txt)
+        end
+        fs:Show()
+    else
+        if btn._mswaLastCDText ~= "" then
+            btn._mswaLastCDText = ""
+            fs:SetText("")
+        end
+        fs:Hide()
+    end
+end
+
 -- Inline stack style: no MSWA_GetDB, no MSWA_GetSpellSettings
 function MSWA_ApplyStackStyle(btn, s)
     local target = btn.stackText
     if not target then return end
-    local path = MSWA_GetFontPathFromKey((s and s.stackFontKey) or "DEFAULT")
-    local size = tonumber((s and s.stackFontSize) or 12) or 12
+    local db = MSWA_GetDB()
+    -- Font key resolution: per-aura override -> global stack -> global -> DEFAULT
+    local fontKey = (s and s.stackFontKey) or (db and db.stackFontKey) or (db and db.fontKey) or "DEFAULT"
+    local path = MSWA_GetFontPathFromKey(fontKey)
+    if not path and target.GetFont then path = select(1, target:GetFont()) end
+    local size = tonumber((s and s.stackFontSize) or (db and db.stackFontSize) or 12) or 12
     if size < 6 then size = 6 elseif size > 48 then size = 48 end
-    local tc = s and s.stackColor
+    local tc = (s and s.stackColor) or (db and db.stackColor)
     local r, g, b = 1, 1, 1
     if tc then r = tonumber(tc.r) or 1; g = tonumber(tc.g) or 1; b = tonumber(tc.b) or 1 end
-    local point = (s and s.stackPoint) or "BOTTOMRIGHT"
+    local point = (s and s.stackPoint) or (db and db.stackPoint) or "BOTTOMRIGHT"
     local baseOff = TEXT_POINT_OFFSETS[point] or TEXT_POINT_OFFSETS.BOTTOMRIGHT
-    local ox = tonumber(s and s.stackOffsetX) or 0
-    local oy = tonumber(s and s.stackOffsetY) or 0
+    local ox = tonumber((s and s.stackOffsetX) or (db and db.stackOffsetX) or 0) or 0
+    local oy = tonumber((s and s.stackOffsetY) or (db and db.stackOffsetY) or 0) or 0
     if path then target:SetFont(path, size, "OUTLINE") end
     target:SetTextColor(r, g, b, 1)
     target:ClearAllPoints()
@@ -433,11 +506,11 @@ end
 function MSWA_GetStackStyleForKey(key)
     local db = MSWA_GetDB()
     local s = key and select(1, MSWA_GetSpellSettings(db, key))
-    local size = tonumber((s and s.stackFontSize) or 12) or 12
+    local size = tonumber((s and s.stackFontSize) or (db and db.stackFontSize) or 12) or 12
     if size < 6 then size = 6 elseif size > 48 then size = 48 end
-    local tc = (s and s.stackColor) or {r=1,g=1,b=1}
-    local point = (s and s.stackPoint) or "BOTTOMRIGHT"
-    return size, tonumber(tc.r) or 1, tonumber(tc.g) or 1, tonumber(tc.b) or 1, point, tonumber(s and s.stackOffsetX) or 0, tonumber(s and s.stackOffsetY) or 0
+    local tc = (s and s.stackColor) or (db and db.stackColor) or {r=1,g=1,b=1}
+    local point = (s and s.stackPoint) or (db and db.stackPoint) or "BOTTOMRIGHT"
+    return size, tonumber(tc.r) or 1, tonumber(tc.g) or 1, tonumber(tc.b) or 1, point, tonumber((s and s.stackOffsetX) or (db and db.stackOffsetX) or 0) or 0, tonumber((s and s.stackOffsetY) or (db and db.stackOffsetY) or 0) or 0
 end
 
 function MSWA_GetStackShowMode(key)

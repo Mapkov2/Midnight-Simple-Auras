@@ -538,13 +538,20 @@ local function MSWA_CreateIcon(i)
     btn.cooldown = CreateFrame("Cooldown", nil, btn, "CooldownFrameTemplate")
     btn.cooldown:SetAllPoints(true)
     if btn.cooldown.SetHideCountdownNumbers then
-        btn.cooldown:SetHideCountdownNumbers(false)
+        -- We render our own cooldown text (font + size + offsets live-applied).
+        btn.cooldown:SetHideCountdownNumbers(true)
     end
 
     btn.count = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     btn.count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
     btn.count:SetText("")
     btn.count:Hide()
+
+    -- Custom cooldown text (styleable, live)
+    btn.cooldownText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.cooldownText:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+    btn.cooldownText:SetText("")
+    btn.cooldownText:Hide()
 
     btn.stackText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     btn.stackText:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
