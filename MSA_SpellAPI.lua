@@ -1,11 +1,11 @@
 -- ########################################################
--- MSA_SpellAPI.lua  (v3 – max performance rewrite)
+-- MSA_SpellAPI.lua  (v3 â€“ max performance rewrite)
 --
 -- Rules:
---   • pcall ONLY for Midnight secret-value APIs
---   • Font paths cached – zero pcall in hot path
---   • CD API detected once at load time
---   • All hot-path helpers accept (db, s) – no redundant lookups
+--   â€¢ pcall ONLY for Midnight secret-value APIs
+--   â€¢ Font paths cached â€“ zero pcall in hot path
+--   â€¢ CD API detected once at load time
+--   â€¢ All hot-path helpers accept (db, s) â€“ no redundant lookups
 -- ########################################################
 
 local type, tostring, tonumber, select = type, tostring, tonumber, select
@@ -192,11 +192,27 @@ end
 local hasGetRemaining = C_Spell and C_Spell.GetSpellCooldownRemaining
 
 function MSWA_GetSpellGlowRemaining(spellID)
-    if not spellID or not hasGetRemaining then return 0, false end
-    local rem = C_Spell.GetSpellCooldownRemaining(spellID)
-    if type(rem) == "number" and rem > 0 then
-        return rem, true
-    end
+    if not spellID then return 0, false end
+    -- All cdInfo fields can be secret/tainted in Midnight, so pcall everything
+    local hasGetCD = C_Spell and C_Spell.GetSpellCooldown
+    if not hasGetCD then return 0, false end
+    local ok, rem, onCD = pcall(function()
+        local cdInfo = C_Spell.GetSpellCooldown(spellID)
+        if not cdInfo then return 0, false end
+        local st, dur = cdInfo.startTime, cdInfo.duration
+        if not st or not dur or st <= 0 or dur <= 1.5 then return 0, false end
+        local remaining = (st + dur) - GetTime()
+        -- Refine with GetSpellCooldownRemaining if available
+        if hasGetRemaining then
+            local r = C_Spell.GetSpellCooldownRemaining(spellID)
+            if type(r) == "number" and r > 0 then
+                remaining = r
+            end
+        end
+        if remaining > 0 then return remaining, true end
+        return 0, false
+    end)
+    if ok then return rem, onCD end
     return 0, false
 end
 
@@ -286,7 +302,7 @@ function MSWA_ApplyStackStyle(btn, s)
 end
 
 -----------------------------------------------------------
--- Buff visual (stacks/charges) – accepts db + s
+-- Buff visual (stacks/charges) â€“ accepts db + s
 -----------------------------------------------------------
 
 function MSWA_UpdateBuffVisual_Fast(btn, s, spellID, isItem, itemID)
@@ -318,7 +334,7 @@ function MSWA_UpdateBuffVisual_Fast(btn, s, spellID, isItem, itemID)
 end
 
 -----------------------------------------------------------
--- Conditional text color – accepts s directly
+-- Conditional text color â€“ accepts s directly
 -----------------------------------------------------------
 
 local function FindCooldownText(cd)
@@ -369,7 +385,7 @@ function MSWA_ApplyConditionalTextColor_Fast(btn, s, db, remaining, isOnCooldown
 end
 
 -----------------------------------------------------------
--- Swipe darken – accepts s directly
+-- Swipe darken â€“ accepts s directly
 -----------------------------------------------------------
 
 function MSWA_ApplySwipeDarken_Fast(btn, s)

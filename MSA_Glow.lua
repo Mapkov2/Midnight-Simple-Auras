@@ -1,6 +1,6 @@
 -- ########################################################
 -- MSA_Glow.lua
--- LibCustomGlow integration – conditional glow per aura
+-- LibCustomGlow integration â€“ conditional glow per aura
 -- v3: hot-path accepts gs directly, zero DB lookups
 -- ########################################################
 
@@ -45,8 +45,8 @@ local GLOW_CONDITIONS = {
     ALWAYS       = "Always",
     READY        = "Ready (off CD)",
     ON_COOLDOWN  = "On Cooldown",
-    TIMER_BELOW  = "Timer \xe2\x89\xa4 X sec",
-    TIMER_ABOVE  = "Timer \xe2\x89\xa5 X sec",
+    TIMER_BELOW  = "Timer <= X sec",
+    TIMER_ABOVE  = "Timer >= X sec",
 }
 MSWA.GLOW_CONDITIONS = GLOW_CONDITIONS
 
@@ -162,7 +162,12 @@ end
 function MSWA_UpdateGlow_Fast(btn, gs, remaining, isOnCooldown)
     if ShouldGlow(gs, remaining, isOnCooldown) then
         local newType = gs.glowType or "PIXEL"
-        if btn._msaGlowActive and btn._msaGlowType ~= newType then
+        if btn._msaGlowActive and btn._msaGlowType == newType then
+            -- Already glowing with correct type, don't restart animation
+            return
+        end
+        -- Type changed or glow just became active
+        if btn._msaGlowActive then
             StopGlowOnButton(btn)
         end
         ApplyGlow(btn, gs)

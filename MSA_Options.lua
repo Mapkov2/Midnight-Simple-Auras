@@ -360,6 +360,20 @@ MSWA_UpdateDetailPanel = function()
         f.swipeDarkenCheck:SetChecked((s and s.swipeDarken) and true or false)
     end
 
+    -- Sync alpha sliders
+    if f.cdAlphaSlider then
+        local v = (s and tonumber(s.cdAlpha)) or 1.0
+        f.cdAlphaSlider:SetValue(math.floor(v * 100 + 0.5))
+    end
+    if f.oocAlphaSlider then
+        local v = (s and tonumber(s.oocAlpha)) or 1.0
+        f.oocAlphaSlider:SetValue(math.floor(v * 100 + 0.5))
+    end
+    if f.combatAlphaSlider then
+        local v = (s and tonumber(s.combatAlpha)) or 1.0
+        f.combatAlphaSlider:SetValue(math.floor(v * 100 + 0.5))
+    end
+
     -- Sync conditional 2nd text color controls
     if f.tc2Check then
         local tc2en = (s and s.textColor2Enabled) and true or false
@@ -736,7 +750,7 @@ local function MSWA_CreateOptionsFrame()
                     ShowInlineRename(self, currentName, self.key, nil)
                     return
                 end
-                MSWA.selectedSpellID = self.key; MSWA.selectedGroupID = nil; MSWA_RefreshOptionsList(); return
+                MSWA.selectedSpellID = self.key; MSWA.selectedGroupID = nil; MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList(); return
             end
             if self.entryType == "GROUP" and self.groupID then
                 if isDoubleClick then
@@ -747,10 +761,10 @@ local function MSWA_CreateOptionsFrame()
                     ShowInlineRename(self, currentName, nil, self.groupID)
                     return
                 end
-                MSWA.selectedGroupID = self.groupID; MSWA.selectedSpellID = nil; MSWA_RefreshOptionsList(); return
+                MSWA.selectedGroupID = self.groupID; MSWA.selectedSpellID = nil; MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList(); return
             end
             if self.entryType == "UNGROUPED" then
-                MSWA.selectedSpellID = nil; MSWA.selectedGroupID = nil; MSWA_RefreshOptionsList()
+                MSWA.selectedSpellID = nil; MSWA.selectedGroupID = nil; MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList()
             end
         end)
 
@@ -1528,6 +1542,8 @@ local function MSWA_CreateOptionsFrame()
     function f.glowPanel2:Sync()
         local key = MSWA.selectedSpellID
         if not key then return end
+        -- Stop active glows so changed settings (color, type, etc.) get re-applied
+        MSWA_StopAllGlows()
         local s2 = MSWA_GetAuraSettings and MSWA_GetAuraSettings(key) or nil
         local gs = (s2 and s2.glow) or {}
         local defaults = MSWA.GLOW_DEFAULTS or {}
@@ -1731,9 +1747,68 @@ local function MSWA_CreateOptionsFrame()
         MSWA_RequestUpdateSpells()
     end)
 
+    -- ======= Alpha Sliders Section =======
+    local alphaSep = dp:CreateTexture(nil, "ARTWORK")
+    alphaSep:SetPoint("TOPLEFT", f.swipeDarkenCheck, "BOTTOMLEFT", 4, -10)
+    alphaSep:SetSize(400, 1); alphaSep:SetColorTexture(1, 1, 1, 0.12)
+
+    local alphaTitle = dp:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    alphaTitle:SetPoint("TOPLEFT", alphaSep, "BOTTOMLEFT", 0, -6)
+    alphaTitle:SetText("|cffffcc00Alpha / Opacity|r")
+
+    -- Helper to create a clean labeled alpha slider (0% - 100%)
+    local function CreateAlphaSlider(parent, label, anchorFrame, yOff, settingsKey)
+        local row = CreateFrame("Frame", nil, parent)
+        row:SetHeight(22)
+        row:SetPoint("TOPLEFT", anchorFrame, "BOTTOMLEFT", 0, yOff)
+        row:SetPoint("RIGHT", parent, "RIGHT", -10, 0)
+
+        local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("LEFT", row, "LEFT", 0, 0)
+        lbl:SetWidth(100)
+        lbl:SetJustifyH("LEFT")
+        lbl:SetText(label)
+
+        local valText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        valText:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+        valText:SetWidth(36)
+        valText:SetJustifyH("RIGHT")
+
+        local slider = CreateFrame("Slider", nil, row, "OptionsSliderTemplate")
+        slider:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
+        slider:SetPoint("RIGHT", valText, "LEFT", -8, 0)
+        slider:SetHeight(16)
+        slider:SetMinMaxValues(0, 100)
+        slider:SetValueStep(5)
+        slider:SetObeyStepOnDrag(true)
+        -- Hide built-in template labels to prevent clipping
+        slider.Low:SetText(""); slider.Low:Hide()
+        slider.High:SetText(""); slider.High:Hide()
+        slider.Text:SetText(""); slider.Text:Hide()
+
+        slider:SetScript("OnValueChanged", function(self, val)
+            val = math.floor(val + 0.5)
+            valText:SetText(val .. "%")
+            local key = MSWA.selectedSpellID; if not key then return end
+            local ss = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+            if val >= 100 then
+                ss[settingsKey] = nil
+            else
+                ss[settingsKey] = val / 100
+            end
+            MSWA_RequestUpdateSpells()
+        end)
+
+        return slider, row, valText
+    end
+
+    f.cdAlphaSlider, f.cdAlphaRow, f.cdAlphaVal = CreateAlphaSlider(dp, "On Cooldown:", alphaTitle, -4, "cdAlpha")
+    f.oocAlphaSlider, f.oocAlphaRow, f.oocAlphaVal = CreateAlphaSlider(dp, "Out of Combat:", f.cdAlphaRow, -2, "oocAlpha")
+    f.combatAlphaSlider, f.combatAlphaRow, f.combatAlphaVal = CreateAlphaSlider(dp, "In Combat:", f.oocAlphaRow, -2, "combatAlpha")
+
     -- ======= Stack Text Section =======
     local stackSep = dp:CreateTexture(nil, "ARTWORK")
-    stackSep:SetPoint("TOPLEFT", f.swipeDarkenCheck, "BOTTOMLEFT", 4, -10)
+    stackSep:SetPoint("TOPLEFT", f.combatAlphaRow, "BOTTOMLEFT", 0, -10)
     stackSep:SetSize(400, 1); stackSep:SetColorTexture(1, 1, 1, 0.12)
 
     f.stackShowLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1939,7 +2014,7 @@ local function MSWA_CreateOptionsFrame()
     f.tc2ColorSwatch = f.tc2ColorBtn:CreateTexture(nil, "ARTWORK"); f.tc2ColorSwatch:SetAllPoints(true); f.tc2ColorSwatch:SetColorTexture(1, 0, 0, 1)
     local tc2Border = f.tc2ColorBtn:CreateTexture(nil, "BORDER"); tc2Border:SetPoint("TOPLEFT", f.tc2ColorBtn, "TOPLEFT", -1, 1); tc2Border:SetPoint("BOTTOMRIGHT", f.tc2ColorBtn, "BOTTOMRIGHT", 1, -1); tc2Border:SetColorTexture(0, 0, 0, 1)
 
-    -- Condition button (cycles: TIMER_BELOW â†’ TIMER_ABOVE)
+    -- Condition button (cycles: TIMER_BELOW Ã¢â€ â€™ TIMER_ABOVE)
     f.tc2CondLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.tc2CondLabel:SetPoint("LEFT", f.tc2ColorBtn, "RIGHT", 16, 0)
     f.tc2CondLabel:SetText("When:")
@@ -1955,7 +2030,7 @@ local function MSWA_CreateOptionsFrame()
     f.tc2ValueLabel:SetText("sec")
 
     -- Set scroll child height (covers all content so scrollbar appears when needed)
-    dp:SetHeight(560)
+    dp:SetHeight(640)
 
     -- Helper: update condition button text
     local function UpdateTC2CondText(cond)
@@ -2152,7 +2227,7 @@ local function MSWA_CreateOptionsFrame()
     f.btnIDInfo:SetScript("OnClick", function(self, button)
         local db = MSWA_GetDB()
         if button == "RightButton" then
-            -- Right-click: cycle modes (Both → Spell only → Icon only → Off)
+            -- Right-click: cycle modes (Both â†’ Spell only â†’ Icon only â†’ Off)
             if db.showSpellID and db.showIconID then
                 db.showSpellID = true; db.showIconID = false
                 MSWA_Print("Tooltip: Spell/Item ID only")

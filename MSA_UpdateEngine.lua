@@ -1,13 +1,13 @@
 -- ########################################################
--- MSA_UpdateEngine.lua  (v4 – zero waste)
+-- MSA_UpdateEngine.lua  (v4 â€“ zero waste)
 --
 -- Perf fixes vs v3:
---   • Combat/encounter state cached once, not per icon
---   • Icon texture cached per button (skip GetSpellInfo)
---   • Masque ReSkin ONLY when icon count changes
---   • Event registration ONLY when icon count changes
---   • Glow settings passed directly (zero DB lookup)
---   • MSWA_GetDB() returns cached table (no migration checks)
+--   â€¢ Combat/encounter state cached once, not per icon
+--   â€¢ Icon texture cached per button (skip GetSpellInfo)
+--   â€¢ Masque ReSkin ONLY when icon count changes
+--   â€¢ Event registration ONLY when icon count changes
+--   â€¢ Glow settings passed directly (zero DB lookup)
+--   â€¢ MSWA_GetDB() returns cached table (no migration checks)
 -- ########################################################
 
 local pairs, type, pcall, tonumber, tostring = pairs, type, pcall, tonumber, tostring
@@ -28,11 +28,12 @@ local THROTTLE_INTERVAL = 0.100   -- 10 Hz
 local engineFrame = CreateFrame("Frame", "MSWA_EngineFrame", UIParent)
 engineFrame:Hide()
 
-local dirty          = false
-local autoBuffActive = false
-local lastFullUpdate = 0
-local forceImmediate = false
-local lastActiveCount = 0
+local dirty              = false
+local autoBuffActive     = false
+local anyCooldownActive  = false
+local lastFullUpdate     = 0
+local forceImmediate     = false
+local lastActiveCount    = 0
 
 -----------------------------------------------------------
 -- Forward-declared
@@ -128,6 +129,26 @@ local function SetIconTexture(btn, key)
 end
 
 -----------------------------------------------------------
+-- Alpha computation: cdAlpha, oocAlpha, combatAlpha
+-----------------------------------------------------------
+
+local function ComputeAlpha(s, isOnCD, inCombat)
+    local alpha = 1.0
+    if inCombat then
+        local ca = s and tonumber(s.combatAlpha)
+        if ca then alpha = alpha * ca end
+    else
+        local oa = s and tonumber(s.oocAlpha)
+        if oa then alpha = alpha * oa end
+    end
+    if isOnCD then
+        local cda = s and tonumber(s.cdAlpha)
+        if cda then alpha = alpha * cda end
+    end
+    return alpha
+end
+
+-----------------------------------------------------------
 -- UpdateSpells (the main hot loop)
 -----------------------------------------------------------
 
@@ -144,6 +165,11 @@ local function MSWA_UpdateSpells()
     local previewMode   = MSWA.previewMode
     local autoBuff      = MSWA._autoBuff
     local icons         = MSWA.icons
+
+    -- Selected-aura preview: when options are open and an aura is selected,
+    -- always show that aura so the user can see what they're editing.
+    local optFrame      = MSWA.optionsFrame
+    local selectedKey   = (optFrame and optFrame:IsShown() and MSWA.selectedSpellID) or nil
 
     -- Cache API availability once
     local hasGetCD          = C_Spell and C_Spell.GetSpellCooldown
@@ -172,7 +198,7 @@ local function MSWA_UpdateSpells()
                     local s   = settingsTable[key] or settingsTable[tostring(key)]
                     local shouldLoad = MSWA_ShouldLoadAura(s, inCombat, inEncounter)
 
-                    if shouldLoad or previewMode then
+                    if shouldLoad or previewMode or key == selectedKey then
                         local btn = icons[index]
 
                         SetIconTexture(btn, key)
@@ -202,8 +228,8 @@ local function MSWA_UpdateSpells()
                             if showBuff then
                                 PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
                                 MSWA_ApplyCooldownFrame(btn.cooldown, ab.startTime, buffDur, 1)
-                                btn.icon:SetDesaturated(not shouldLoad)
-                                btn:SetAlpha(shouldLoad and 1.0 or 0.5)
+                                btn.icon:SetDesaturated(false)
+                                btn:SetAlpha(ComputeAlpha(s, true, inCombat))
                                 ClearStackAndCount(btn)
 
                                 local glowRem = buffDur - (GetTime() - ab.startTime)
@@ -218,11 +244,11 @@ local function MSWA_UpdateSpells()
                                 MSWA_ApplySwipeDarken_Fast(btn, s)
                                 index = index + 1
 
-                            elseif previewMode then
+                            elseif previewMode or key == selectedKey then
                                 PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
                                 MSWA_ClearCooldownFrame(btn.cooldown)
-                                btn.icon:SetDesaturated(true)
-                                btn:SetAlpha(0.5)
+                                btn.icon:SetDesaturated(false)
+                                btn:SetAlpha(ComputeAlpha(s, false, inCombat))
                                 ClearStackAndCount(btn)
                                 MSWA_StopGlow(btn)
                                 index = index + 1
@@ -257,16 +283,29 @@ local function MSWA_UpdateSpells()
                                 btn.icon:SetDesaturated(false)
                             end
 
-                            -- Glow remaining (zero pcall)
-                            local glowRem, glowOnCD = MSWA_GetSpellGlowRemaining(spellID)
-
-                            -- Preview overlay
-                            if not shouldLoad then
-                                btn.icon:SetDesaturated(true)
-                                btn:SetAlpha(0.5)
-                            else
-                                btn:SetAlpha(1.0)
+                            -- Glow/conditional state for spell cooldowns
+                            -- IsCooldownActive is taint-safe (reads frame state, not API)
+                            local glowOnCD = MSWA_IsCooldownActive(btn)
+                            local glowRem  = 0
+                            if glowOnCD then
+                                -- Try API (works for non-tainted spells)
+                                local apiRem = MSWA_GetSpellGlowRemaining(spellID)
+                                if apiRem > 0 then
+                                    glowRem = apiRem
+                                elseif btn.cooldown.GetCooldownTimes then
+                                    -- Fallback: cooldown frame widget stores untainted ms values
+                                    pcall(function()
+                                        local sMs, dMs = btn.cooldown:GetCooldownTimes()
+                                        if sMs and dMs and sMs > 0 and dMs > 0 then
+                                            glowRem = (sMs + dMs) / 1000 - GetTime()
+                                            if glowRem < 0 then glowRem = 0 end
+                                        end
+                                    end)
+                                end
                             end
+
+                            -- Alpha: combat state + cooldown
+                            btn:SetAlpha(ComputeAlpha(s, glowOnCD, inCombat))
 
                             -- Glow (pass settings directly, zero DB lookup)
                             local gs = s and s.glow
@@ -280,7 +319,7 @@ local function MSWA_UpdateSpells()
 
                             index = index + 1
                         end
-                    end -- shouldLoad or previewMode
+                    end -- shouldLoad or previewMode or selectedKey
                 end -- spellID
             end -- enabled
         end
@@ -299,7 +338,7 @@ local function MSWA_UpdateSpells()
                     local s = settingsTable[key] or settingsTable[tostring(key)]
                     local shouldLoad = MSWA_ShouldLoadAura(s, inCombat, inEncounter)
 
-                    if shouldLoad or previewMode then
+                    if shouldLoad or previewMode or key == selectedKey then
                         local btn = icons[index]
 
                         SetIconTexture(btn, key)
@@ -329,8 +368,8 @@ local function MSWA_UpdateSpells()
                             if showBuff then
                                 PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
                                 MSWA_ApplyCooldownFrame(btn.cooldown, ab.startTime, buffDur, 1)
-                                btn.icon:SetDesaturated(not shouldLoad)
-                                btn:SetAlpha(shouldLoad and 1.0 or 0.5)
+                                btn.icon:SetDesaturated(false)
+                                btn:SetAlpha(ComputeAlpha(s, true, inCombat))
                                 ClearStackAndCount(btn)
 
                                 local glowRem = buffDur - (GetTime() - ab.startTime)
@@ -345,11 +384,11 @@ local function MSWA_UpdateSpells()
                                 MSWA_ApplySwipeDarken_Fast(btn, s)
                                 index = index + 1
 
-                            elseif previewMode then
+                            elseif previewMode or key == selectedKey then
                                 PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
                                 MSWA_ClearCooldownFrame(btn.cooldown)
-                                btn.icon:SetDesaturated(true)
-                                btn:SetAlpha(0.5)
+                                btn.icon:SetDesaturated(false)
+                                btn:SetAlpha(ComputeAlpha(s, false, inCombat))
                                 ClearStackAndCount(btn)
                                 MSWA_StopGlow(btn)
                                 index = index + 1
@@ -374,12 +413,8 @@ local function MSWA_UpdateSpells()
 
                             local glowRem, glowOnCD = MSWA_GetItemGlowRemaining(start, duration)
 
-                            if not shouldLoad then
-                                btn.icon:SetDesaturated(true)
-                                btn:SetAlpha(0.5)
-                            else
-                                btn:SetAlpha(1.0)
-                            end
+                            -- Alpha: combat state + cooldown
+                            btn:SetAlpha(ComputeAlpha(s, glowOnCD, inCombat))
 
                             local gs = s and s.glow
                             if gs and gs.enabled then
@@ -392,7 +427,7 @@ local function MSWA_UpdateSpells()
 
                             index = index + 1
                         end
-                    end -- shouldLoad or previewMode
+                    end -- shouldLoad or previewMode or selectedKey
                 end -- tex
             end -- enabled
         end
@@ -440,6 +475,18 @@ local function MSWA_UpdateSpells()
             end
         end
     end
+
+    -----------------------------------------------------------
+    -- 6) Check if any icon is on cooldown (keeps engine ticking
+    --    for timer-based glow, text color, and alpha conditions)
+    -----------------------------------------------------------
+    anyCooldownActive = false
+    for i = 1, activeCount do
+        if MSWA_IsCooldownActive(icons[i]) then
+            anyCooldownActive = true
+            break
+        end
+    end
 end
 
 -- Export globally
@@ -481,6 +528,12 @@ engineFrame:SetScript("OnUpdate", function(self)
         AutoBuffTick(MSWA_GetDB().spellSettings or {})
     end
 
+    -- Active cooldowns need continuous updates for timer-based
+    -- glow conditions, text color conditions, and alpha
+    if anyCooldownActive and not dirty then
+        dirty = true
+    end
+
     if dirty then
         if forceImmediate or (now - lastFullUpdate) >= THROTTLE_INTERVAL then
             dirty = false
@@ -490,7 +543,7 @@ engineFrame:SetScript("OnUpdate", function(self)
         end
     end
 
-    if not dirty and not autoBuffActive then
+    if not dirty and not autoBuffActive and not anyCooldownActive then
         self:Hide()
     end
 end)
