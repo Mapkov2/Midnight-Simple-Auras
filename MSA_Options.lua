@@ -337,6 +337,18 @@ MSWA_UpdateDetailPanel = function()
     if f.detailH then f.detailH:SetText(("%d"):format(h)) end
     if f.detailA then f.detailA:SetText(a) end
 
+    -- Sync custom icon
+    if f.customIconEdit then
+        local cid = (s and s.customIconID) or nil
+        if cid and tonumber(cid) and tonumber(cid) > 0 then
+            f.customIconEdit:SetText(tostring(cid))
+            if f.customIconPreview then f.customIconPreview:SetTexture(tonumber(cid)); f.customIconPreview:Show() end
+        else
+            f.customIconEdit:SetText("")
+            if f.customIconPreview then f.customIconPreview:Hide() end
+        end
+    end
+
     if f.textSizeEdit then
         local size = (s and s.textFontSize) or db.textFontSize or 12
         size = tonumber(size) or 12
@@ -357,6 +369,7 @@ MSWA_UpdateDetailPanel = function()
         f.grayCooldownCheck:SetChecked((s and s.grayOnCooldown) and true or false)
     end
     if f.swipeDarkenCheck then
+        -- "Swipe darkens on loss" == reverse swipe direction.
         f.swipeDarkenCheck:SetChecked((s and s.swipeDarken) and true or false)
     end
 
@@ -466,7 +479,26 @@ MSWA_UpdateDetailPanel = function()
             f.buffDurEdit:SetShown(isAutoBuff)
             if isAutoBuff then
                 local dur = (s and s.autoBuffDuration) or 10
+                dur = math.floor(tonumber(dur) * 1000 + 0.5) / 1000
                 f.buffDurEdit:SetText(tostring(dur))
+            end
+        end
+        -- Buff delay
+        if f.buffDelayLabel then f.buffDelayLabel:SetShown(isAutoBuff) end
+        if f.buffDelayEdit then
+            f.buffDelayEdit:SetShown(isAutoBuff)
+            if isAutoBuff then
+                local d = (s and s.autoBuffDelay) or 0
+                d = math.floor(tonumber(d) * 1000 + 0.5) / 1000
+                f.buffDelayEdit:SetText(tostring(d))
+            end
+        end
+        -- Haste scaling toggle (only visible for AUTOBUFF)
+        if f.hasteScaleCheck then
+            f.hasteScaleCheck:SetShown(isAutoBuff)
+            f.hasteScaleLabel:SetShown(isAutoBuff)
+            if isAutoBuff then
+                f.hasteScaleCheck:SetChecked((s and s.hasteScaling) and true or false)
             end
         end
     end
@@ -1679,6 +1711,9 @@ local function MSWA_CreateOptionsFrame()
     f.buffDurLabel = f.generalPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.buffDurLabel:SetPoint("TOPLEFT", f.autoBuffCheck, "BOTTOMLEFT", 22, -6); f.buffDurLabel:SetText("Buff duration (sec):")
     f.buffDurEdit = CreateFrame("EditBox", nil, f.generalPanel, "InputBoxTemplate"); f.buffDurEdit:SetSize(60, 20); f.buffDurEdit:SetPoint("LEFT", f.buffDurLabel, "RIGHT", 6, 0); f.buffDurEdit:SetAutoFocus(false)
 
+    f.buffDelayLabel = f.generalPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.buffDelayLabel:SetPoint("TOPLEFT", f.buffDurLabel, "BOTTOMLEFT", 0, -8); f.buffDelayLabel:SetText("Timer restart after (sec):")
+    f.buffDelayEdit = CreateFrame("EditBox", nil, f.generalPanel, "InputBoxTemplate"); f.buffDelayEdit:SetSize(60, 20); f.buffDelayEdit:SetPoint("LEFT", f.buffDelayLabel, "RIGHT", 6, 0); f.buffDelayEdit:SetAutoFocus(false)
+
     f.autoBuffCheck:SetScript("OnClick", function(self)
         local key = MSWA.selectedSpellID; if not key then return end
         local db2 = MSWA_GetDB(); local s2 = select(1, MSWA_GetOrCreateSpellSettings(db2, key))
@@ -1690,14 +1725,38 @@ local function MSWA_CreateOptionsFrame()
     local function ApplyBuffDuration()
         local key = MSWA.selectedSpellID; if not key then return end
         local db2 = MSWA_GetDB(); local s2 = select(1, MSWA_GetOrCreateSpellSettings(db2, key))
-        local v = tonumber(f.buffDurEdit:GetText()); if v and v >= 0.1 then s2.autoBuffDuration = v end
+        local v = tonumber(f.buffDurEdit:GetText()); if v and v >= 0.1 then s2.autoBuffDuration = math.floor(v * 1000 + 0.5) / 1000 end
         MSWA._autoBuff[key] = nil; MSWA_RequestUpdateSpells()
     end
     f.buffDurEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyBuffDuration() end)
     f.buffDurEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
+    local function ApplyBuffDelay()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local v = tonumber(f.buffDelayEdit:GetText())
+        if v and v >= 0 then v = math.floor(v * 1000 + 0.5) / 1000; s2.autoBuffDelay = (v > 0) and v or nil else s2.autoBuffDelay = nil end
+        MSWA._autoBuff[key] = nil; MSWA_RequestUpdateSpells()
+    end
+    f.buffDelayEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyBuffDelay() end)
+    f.buffDelayEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    f.buffDelayEdit:SetScript("OnEditFocusLost", function() ApplyBuffDelay() end)
+
+    -- Haste scaling toggle
+    f.hasteScaleCheck = CreateFrame("CheckButton", nil, f.generalPanel, "ChatConfigCheckButtonTemplate")
+    f.hasteScaleCheck:SetPoint("TOPLEFT", f.buffDelayLabel, "BOTTOMLEFT", -22, -6)
+    f.hasteScaleLabel = f.generalPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.hasteScaleLabel:SetPoint("LEFT", f.hasteScaleCheck, "RIGHT", 2, 0)
+    f.hasteScaleLabel:SetText("Haste scaling  (duration adjusts to spell haste)")
+    f.hasteScaleCheck:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.hasteScaling = self:GetChecked() and true or nil
+        MSWA._autoBuff[key] = nil; MSWA_RequestUpdateSpells()
+    end)
+
     -- Anchor
-    local labelA = f.generalPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelA:SetPoint("TOPLEFT", f.buffDurLabel, "BOTTOMLEFT", -22, -16); labelA:SetText("Anchor to frame:")
+    local labelA = f.generalPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelA:SetPoint("TOPLEFT", f.hasteScaleCheck, "BOTTOMLEFT", 4, -10); labelA:SetText("Anchor to frame:")
     f.detailA = CreateFrame("EditBox", nil, f.generalPanel, "InputBoxTemplate"); f.detailA:SetSize(260, 20); f.detailA:SetPoint("LEFT", labelA, "RIGHT", 6, 0); f.detailA:SetAutoFocus(false)
     f.detailACD = CreateFrame("Button", nil, f.generalPanel, "UIPanelButtonTemplate"); f.detailACD:SetSize(110, 22); f.detailACD:SetPoint("TOPLEFT", labelA, "BOTTOMLEFT", 0, -10); f.detailACD:SetText("CD Manager")
     f.detailAMSUF = CreateFrame("Button", nil, f.generalPanel, "UIPanelButtonTemplate"); f.detailAMSUF:SetSize(110, 22); f.detailAMSUF:SetPoint("LEFT", f.detailACD, "RIGHT", 6, 0); f.detailAMSUF:SetText("MSUF Player")
@@ -1735,7 +1794,54 @@ local function MSWA_CreateOptionsFrame()
     local labelH = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelH:SetPoint("TOPLEFT", labelW, "BOTTOMLEFT", 0, -10); labelH:SetText("Height:")
     f.detailH = CreateFrame("EditBox", nil, dp, "InputBoxTemplate"); f.detailH:SetSize(70, 20); f.detailH:SetPoint("LEFT", labelH, "RIGHT", 6, 0); f.detailH:SetAutoFocus(false)
 
-    f.fontLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.fontLabel:SetPoint("TOPLEFT", labelH, "BOTTOMLEFT", 0, -18); f.fontLabel:SetText("Font:")
+    -- Custom Icon override
+    f.customIconLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.customIconLabel:SetPoint("TOPLEFT", labelH, "BOTTOMLEFT", 0, -14)
+    f.customIconLabel:SetText("Custom Icon:")
+
+    f.customIconEdit = CreateFrame("EditBox", nil, dp, "InputBoxTemplate")
+    f.customIconEdit:SetSize(70, 20)
+    f.customIconEdit:SetPoint("LEFT", f.customIconLabel, "RIGHT", 6, 0)
+    f.customIconEdit:SetAutoFocus(false)
+    f.customIconEdit:SetNumeric(true)
+
+    f.customIconPreview = dp:CreateTexture(nil, "ARTWORK")
+    f.customIconPreview:SetSize(20, 20)
+    f.customIconPreview:SetPoint("LEFT", f.customIconEdit, "RIGHT", 6, 0)
+    f.customIconPreview:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    f.customIconPreview:Hide()
+
+    f.customIconClear = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate")
+    f.customIconClear:SetSize(20, 20)
+    f.customIconClear:SetPoint("LEFT", f.customIconPreview, "RIGHT", 4, 0)
+    f.customIconClear:SetText("X")
+    f.customIconClear:SetScript("OnClick", function()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.customIconID = nil
+        if f.customIconEdit then f.customIconEdit:SetText("") end
+        if f.customIconPreview then f.customIconPreview:Hide() end
+        MSWA_InvalidateIconCache(); MSWA_RefreshOptionsList()
+    end)
+
+    local function ApplyCustomIcon()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local val = tonumber(f.customIconEdit:GetText())
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        if val and val > 0 then
+            s2.customIconID = val
+            f.customIconPreview:SetTexture(val)
+            f.customIconPreview:Show()
+        else
+            s2.customIconID = nil
+            f.customIconPreview:Hide()
+        end
+        MSWA_InvalidateIconCache(); MSWA_RefreshOptionsList()
+    end
+    f.customIconEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyCustomIcon() end)
+    f.customIconEdit:SetScript("OnEditFocusLost", function() ApplyCustomIcon() end)
+
+    f.fontLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.fontLabel:SetPoint("TOPLEFT", f.customIconLabel, "BOTTOMLEFT", 0, -18); f.fontLabel:SetText("Font:")
     f.fontDrop = CreateFrame("Frame", "MSWA_FontDropDown", dp, "UIDropDownMenuTemplate"); f.fontDrop:SetPoint("LEFT", f.fontLabel, "RIGHT", -10, -3)
     f.fontPreview = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.fontPreview:SetPoint("LEFT", f.fontDrop, "RIGHT", -10, 0); f.fontPreview:SetText("AaBbYyZz 123")
 
@@ -1769,6 +1875,8 @@ local function MSWA_CreateOptionsFrame()
     f.swipeDarkenCheck:SetScript("OnClick", function(self)
         local key = MSWA.selectedSpellID; if not key then return end
         local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        -- Nil == default (standard Blizzard swipe direction).
+        -- True == "darkens on loss" (reverse swipe).
         s2.swipeDarken = self:GetChecked() and true or nil
         MSWA_RequestUpdateSpells()
     end)
@@ -2040,7 +2148,7 @@ local function MSWA_CreateOptionsFrame()
     f.tc2ColorSwatch = f.tc2ColorBtn:CreateTexture(nil, "ARTWORK"); f.tc2ColorSwatch:SetAllPoints(true); f.tc2ColorSwatch:SetColorTexture(1, 0, 0, 1)
     local tc2Border = f.tc2ColorBtn:CreateTexture(nil, "BORDER"); tc2Border:SetPoint("TOPLEFT", f.tc2ColorBtn, "TOPLEFT", -1, 1); tc2Border:SetPoint("BOTTOMRIGHT", f.tc2ColorBtn, "BOTTOMRIGHT", 1, -1); tc2Border:SetColorTexture(0, 0, 0, 1)
 
-    -- Condition button (cycles: TIMER_BELOW Ã¢â€ â€™ TIMER_ABOVE)
+    -- Condition button (cycles: TIMER_BELOW ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ TIMER_ABOVE)
     f.tc2CondLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.tc2CondLabel:SetPoint("LEFT", f.tc2ColorBtn, "RIGHT", 16, 0)
     f.tc2CondLabel:SetText("When:")
@@ -2253,7 +2361,7 @@ local function MSWA_CreateOptionsFrame()
     f.btnIDInfo:SetScript("OnClick", function(self, button)
         local db = MSWA_GetDB()
         if button == "RightButton" then
-            -- Right-click: cycle modes (Both â†’ Spell only â†’ Icon only â†’ Off)
+            -- Right-click: cycle modes (Both Ã¢â€ â€™ Spell only Ã¢â€ â€™ Icon only Ã¢â€ â€™ Off)
             if db.showSpellID and db.showIconID then
                 db.showSpellID = true; db.showIconID = false
                 MSWA_Print("Tooltip: Spell/Item ID only")

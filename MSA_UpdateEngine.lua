@@ -1,13 +1,13 @@
 -- ########################################################
--- MSA_UpdateEngine.lua  (v4 â€“ zero waste)
+-- MSA_UpdateEngine.lua  (v4 Ã¢â‚¬â€œ zero waste)
 --
 -- Perf fixes vs v3:
---   â€¢ Combat/encounter state cached once, not per icon
---   â€¢ Icon texture cached per button (skip GetSpellInfo)
---   â€¢ Masque ReSkin ONLY when icon count changes
---   â€¢ Event registration ONLY when icon count changes
---   â€¢ Glow settings passed directly (zero DB lookup)
---   â€¢ MSWA_GetDB() returns cached table (no migration checks)
+--   Ã¢â‚¬Â¢ Combat/encounter state cached once, not per icon
+--   Ã¢â‚¬Â¢ Icon texture cached per button (skip GetSpellInfo)
+--   Ã¢â‚¬Â¢ Masque ReSkin ONLY when icon count changes
+--   Ã¢â‚¬Â¢ Event registration ONLY when icon count changes
+--   Ã¢â‚¬Â¢ Glow settings passed directly (zero DB lookup)
+--   Ã¢â‚¬Â¢ MSWA_GetDB() returns cached table (no migration checks)
 -- ########################################################
 
 local pairs, type, pcall, tonumber, tostring = pairs, type, pcall, tonumber, tostring
@@ -20,6 +20,24 @@ local GetItemIcon     = GetItemIcon
 -----------------------------------------------------------
 
 local THROTTLE_INTERVAL = 0.100   -- 10 Hz
+
+-----------------------------------------------------------
+-- Haste-scaled Auto Buff duration helper
+-----------------------------------------------------------
+
+local UnitSpellHaste = UnitSpellHaste
+
+local function GetEffectiveBuffDuration(s)
+    local dur = tonumber(s and s.autoBuffDuration) or 10
+    if dur < 0.1 then dur = 0.1 end
+    if s and s.hasteScaling and UnitSpellHaste then
+        local h = tonumber(UnitSpellHaste("player")) or 0
+        if h > 0 then
+            dur = dur / (1 + h / 100)
+        end
+    end
+    return dur
+end
 
 -----------------------------------------------------------
 -- Engine frame (hidden = zero CPU)
@@ -73,7 +91,7 @@ end
 -----------------------------------------------------------
 
 local function PositionButton(btn, s, key, idx, frame, ICON_SIZE, ICON_SPACE, db)
-    local gid = MSWA_GetAuraGroup(key)
+    local gid = MSWA_GetAuraGroup and MSWA_GetAuraGroup(key) or (_G.GetAuraGroup and _G.GetAuraGroup(key) or nil)
     local group = gid and db.groups and db.groups[gid] or nil
     if group then
         local gx = group.x or 0
@@ -212,13 +230,14 @@ local function MSWA_UpdateSpells()
                         if s and s.auraMode == "AUTOBUFF" then
                             -- ========== SPELL AUTO BUFF MODE ==========
                             local ab = autoBuff[key]
-                            local buffDur = tonumber(s.autoBuffDuration) or 10
-                            if buffDur < 0.1 then buffDur = 0.1 end
+                            local buffDur = GetEffectiveBuffDuration(s)
+                            local buffDelay = tonumber(s.autoBuffDelay) or 0
+                            local timerStart = ab and (ab.startTime + buffDelay) or 0
 
                             local showBuff = false
                             if ab and ab.active then
-                                local elapsed = GetTime() - ab.startTime
-                                if elapsed < buffDur then
+                                local totalWindow = buffDelay + buffDur
+                                if (GetTime() - ab.startTime) < totalWindow then
                                     showBuff = true
                                 else
                                     ab.active = false
@@ -227,12 +246,12 @@ local function MSWA_UpdateSpells()
 
                             if showBuff then
                                 PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
-                                MSWA_ApplyCooldownFrame(btn.cooldown, ab.startTime, buffDur, 1)
+                                MSWA_ApplyCooldownFrame(btn.cooldown, timerStart, buffDur, 1)
                                 btn.icon:SetDesaturated(false)
                                 btn:SetAlpha(ComputeAlpha(s, true, inCombat))
                                 ClearStackAndCount(btn)
 
-                                local glowRem = buffDur - (GetTime() - ab.startTime)
+                                local glowRem = buffDur - (GetTime() - timerStart)
                                 if glowRem < 0 then glowRem = 0 end
                                 local gs = s and s.glow
                                 if gs and gs.enabled then
@@ -336,13 +355,14 @@ local function MSWA_UpdateSpells()
                         if s and s.auraMode == "AUTOBUFF" then
                             -- ========== ITEM AUTO BUFF MODE ==========
                             local ab = autoBuff[key]
-                            local buffDur = tonumber(s and s.autoBuffDuration) or 10
-                            if buffDur < 0.1 then buffDur = 0.1 end
+                            local buffDur = GetEffectiveBuffDuration(s)
+                            local buffDelay = tonumber(s.autoBuffDelay) or 0
+                            local timerStart = ab and (ab.startTime + buffDelay) or 0
 
                             local showBuff = false
                             if ab and ab.active then
-                                local elapsed = GetTime() - ab.startTime
-                                if elapsed < buffDur then
+                                local totalWindow = buffDelay + buffDur
+                                if (GetTime() - ab.startTime) < totalWindow then
                                     showBuff = true
                                 else
                                     ab.active = false
@@ -351,12 +371,12 @@ local function MSWA_UpdateSpells()
 
                             if showBuff then
                                 PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
-                                MSWA_ApplyCooldownFrame(btn.cooldown, ab.startTime, buffDur, 1)
+                                MSWA_ApplyCooldownFrame(btn.cooldown, timerStart, buffDur, 1)
                                 btn.icon:SetDesaturated(false)
                                 btn:SetAlpha(ComputeAlpha(s, true, inCombat))
                                 ClearStackAndCount(btn)
 
-                                local glowRem = buffDur - (GetTime() - ab.startTime)
+                                local glowRem = buffDur - (GetTime() - timerStart)
                                 if glowRem < 0 then glowRem = 0 end
                                 local gs = s and s.glow
                                 if gs and gs.enabled then
@@ -453,8 +473,9 @@ local function MSWA_UpdateSpells()
     for key, ab in pairs(autoBuff) do
         if ab and ab.active then
             local s2 = settingsTable[key] or settingsTable[tostring(key)]
-            local dur = tonumber(s2 and s2.autoBuffDuration) or 10
-            if (now - ab.startTime) < dur then
+            local dur = GetEffectiveBuffDuration(s2)
+            local delay = tonumber(s2 and s2.autoBuffDelay) or 0
+            if (now - ab.startTime) < (delay + dur) then
                 autoBuffActive = true
                 break
             end
@@ -489,8 +510,9 @@ local function AutoBuffTick(settingsTable)
     for key, ab in pairs(MSWA._autoBuff) do
         if ab and ab.active then
             local s2 = settingsTable[key] or settingsTable[tostring(key)]
-            local dur = tonumber(s2 and s2.autoBuffDuration) or 10
-            if (now - ab.startTime) < dur then
+            local dur = GetEffectiveBuffDuration(s2)
+            local delay = tonumber(s2 and s2.autoBuffDelay) or 0
+            if (now - ab.startTime) < (delay + dur) then
                 anyLeft = true
             else
                 ab.active = false

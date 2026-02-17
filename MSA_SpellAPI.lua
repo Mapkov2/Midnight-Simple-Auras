@@ -389,13 +389,29 @@ end
 -----------------------------------------------------------
 
 function MSWA_ApplySwipeDarken_Fast(btn, s)
-    local cd = btn.cooldown
+    local cd = btn and btn.cooldown
     if not cd then return end
-    if s and s.swipeDarken then
-        if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0.8) end
-        if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
+
+    -- We always show a Blizzard-style radial swipe by default.
+    -- The Options toggle "Swipe darkens on loss" controls *direction* (reverse),
+    -- NOT whether the swipe exists.
+    --
+    -- Standard Blizzard cooldown swipe: remaining time is dark, elapsed is bright.
+    -- "Darkens on loss": elapsed becomes dark (reverse swipe), like a draining aura.
+    local reverse = (s and s.swipeDarken) and true or false
+
+    -- IMPORTANT (12.0/Midnight): Cooldown setters/clears may reset flags.
+    -- Re-apply every time to guarantee the swipe stays correct.
+    cd.__mswaSwipeState = reverse and 2 or 1
+
+    if cd.SetDrawEdge then cd:SetDrawEdge(false) end
+    if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
+    if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0.8) end
+    if cd.SetReverse then
+        cd:SetReverse(reverse)
     else
-        if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0) end
+        -- Fallback for older cooldown implementations
+        cd.reverse = reverse
     end
 end
 

@@ -97,6 +97,14 @@ function MSWA_GetDisplayNameForKey(key)
 end
 
 function MSWA_GetIconForKey(key)
+    -- Custom icon override (per-aura setting)
+    local db = MSWA_GetDB()
+    local s = select(1, MSWA_GetSpellSettings(db, key))
+    if s and s.customIconID then
+        local cid = tonumber(s.customIconID)
+        if cid and cid > 0 then return cid end
+    end
+
     if MSWA_IsDraftKey(key) then
         return DRAFT_ICON
     elseif MSWA_IsItemKey(key) then
