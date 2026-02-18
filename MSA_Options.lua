@@ -623,8 +623,23 @@ local function MSWA_CreateOptionsFrame()
     grip:SetScript("OnMouseUp", function(self) f:StopMovingOrSizing() end)
     f.resizeGrip = grip
 
+    -- Title (left) + Version (right)
+    -- NOTE: Never use space-padding to "push" version text; it breaks under scaling and different fonts.
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    f.title:SetPoint("LEFT", f.TitleBg, "LEFT", 10, 0); f.title:SetText("Midnight Simple Auras                                                                                                                                                          Version 1.2")
+    f.title:SetPoint("LEFT", f.TitleBg, "LEFT", 10, 0)
+    f.title:SetText("Midnight Simple Auras")
+
+    f.versionText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.versionText:SetText("Version 1.27")
+    -- Anchor against the close button when available so it always stays top-right.
+    local closeBtn = f.CloseButton or _G[f:GetName() .. "CloseButton"]
+    if closeBtn then
+        f.versionText:SetPoint("RIGHT", closeBtn, "LEFT", -8, 0)
+        f.versionText:SetPoint("TOP", f.TitleBg, "TOP", 0, -1)
+    else
+        -- Fallback: hard top-right with safe padding.
+        f.versionText:SetPoint("TOPRIGHT", f.TitleBg, "TOPRIGHT", -8, -1)
+    end
 
     -- Left: Aura list
     local listPanel = CreateFrame("Frame", nil, f, "InsetFrameTemplate3")

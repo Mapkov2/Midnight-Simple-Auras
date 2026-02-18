@@ -265,11 +265,7 @@ end
 
 -- Inline text style: no MSWA_GetDB, no MSWA_GetSpellSettings
 function MSWA_ApplyTextStyle(btn, db, s)
-    -- IMPORTANT:
-    -- The built-in Cooldown widget numbers are NOT styleable reliably.
-    -- We use a dedicated FontString (btn.cooldownText) for cooldown text.
-    -- Fallback to btn.count for legacy/compat.
-    local count = (btn and (btn.cooldownText or btn.count))
+    local count = btn.count
     if not count then return end
     -- Font key resolution: per-aura override -> global -> DEFAULT
     local fontKey = (s and s.textFontKey) or (db and db.fontKey) or "DEFAULT"
@@ -289,69 +285,6 @@ function MSWA_ApplyTextStyle(btn, db, s)
     count:SetPoint(point, btn, point, off[1], off[2])
 end
 
------------------------------------------------------------
--- Cooldown text (custom FontString) â€” lightweight + live
------------------------------------------------------------
-
-local function _MSWA_FormatCooldownShort(sec, showDecimal)
-    -- Keep formatting secret-safe: comparisons guarded.
-    if sec == nil then return nil end
-
-    local ok, isNum = pcall(function() return type(sec) == "number" end)
-    if not ok or not isNum then
-        local ok2, s = pcall(tostring, sec)
-        if ok2 and type(s) == "string" then return s end
-        return nil
-    end
-
-    if sec < 0 then sec = 0 end
-
-    if sec >= 3600 then
-        local h = math.floor(sec / 3600 + 0.5)
-        return tostring(h) .. "h"
-    end
-    if sec >= 60 then
-        local m = math.floor(sec / 60 + 0.5)
-        return tostring(m) .. "m"
-    end
-    if sec >= 10 then
-        return tostring(math.floor(sec + 0.5))
-    end
-    -- < 10s: show 1 decimal only if enabled
-    if showDecimal then
-        local v = math.floor(sec * 10 + 0.5) / 10
-        return tostring(v)
-    end
-    return tostring(math.floor(sec + 0.5))
-end
-
-function MSWA_UpdateCooldownText(btn, remaining, showDecimal)
-    if not btn then return end
-    local fs = btn.cooldownText or btn.count
-    if not fs then return end
-
-    local txt = nil
-    if remaining ~= nil then
-        local ok, shouldShow = pcall(function() return remaining > 0 end)
-        if ok and shouldShow then
-            txt = _MSWA_FormatCooldownShort(remaining, showDecimal)
-        end
-    end
-
-    if txt and txt ~= "" then
-        if btn._mswaLastCDText ~= txt then
-            btn._mswaLastCDText = txt
-            fs:SetText(txt)
-        end
-        fs:Show()
-    else
-        if btn._mswaLastCDText ~= "" then
-            btn._mswaLastCDText = ""
-            fs:SetText("")
-        end
-        fs:Hide()
-    end
-end
 
 -- Inline stack style: no MSWA_GetDB, no MSWA_GetSpellSettings
 function MSWA_ApplyStackStyle(btn, s)
