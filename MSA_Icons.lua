@@ -542,18 +542,23 @@ local function MSWA_CreateIcon(i)
         btn.cooldown:SetHideCountdownNumbers(true)
     end
 
-    btn.count = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    -- Overlay frame above cooldown so text is never covered by the swipe animation
+    btn._textOverlay = CreateFrame("Frame", nil, btn)
+    btn._textOverlay:SetAllPoints(true)
+    btn._textOverlay:SetFrameLevel(btn.cooldown:GetFrameLevel() + 5)
+
+    btn.count = btn._textOverlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     btn.count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
     btn.count:SetText("")
     btn.count:Hide()
 
     -- Custom cooldown text (styleable, live)
-    btn.cooldownText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.cooldownText = btn._textOverlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     btn.cooldownText:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
     btn.cooldownText:SetText("")
     btn.cooldownText:Hide()
 
-    btn.stackText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.stackText = btn._textOverlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     btn.stackText:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
     btn.stackText:SetText("")
     btn.stackText:Hide()

@@ -1,13 +1,13 @@
 -- ########################################################
--- MSA_UpdateEngine.lua  (v4 Ã¢â‚¬â€œ zero waste)
+-- MSA_UpdateEngine.lua  (v4 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ zero waste)
 --
 -- Perf fixes vs v3:
---   Ã¢â‚¬Â¢ Combat/encounter state cached once, not per icon
---   Ã¢â‚¬Â¢ Icon texture cached per button (skip GetSpellInfo)
---   Ã¢â‚¬Â¢ Masque ReSkin ONLY when icon count changes
---   Ã¢â‚¬Â¢ Event registration ONLY when icon count changes
---   Ã¢â‚¬Â¢ Glow settings passed directly (zero DB lookup)
---   Ã¢â‚¬Â¢ MSWA_GetDB() returns cached table (no migration checks)
+--   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Combat/encounter state cached once, not per icon
+--   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Icon texture cached per button (skip GetSpellInfo)
+--   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Masque ReSkin ONLY when icon count changes
+--   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Event registration ONLY when icon count changes
+--   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Glow settings passed directly (zero DB lookup)
+--   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ MSWA_GetDB() returns cached table (no migration checks)
 -- ########################################################
 
 local pairs, type, pcall, tonumber, tostring = pairs, type, pcall, tonumber, tostring
@@ -252,7 +252,7 @@ local function MSWA_UpdateSpells()
                                 if MSWA_UpdateCooldownText then
                                     local glowRem = buffDur - (GetTime() - timerStart)
                                     if glowRem < 0 then glowRem = 0 end
-                                    MSWA_UpdateCooldownText(btn, glowRem)
+                                    MSWA_UpdateCooldownText(btn, glowRem, s and s.showDecimal)
                                 end
                                 btn.icon:SetDesaturated(false)
                                 btn:SetAlpha(ComputeAlpha(s, true, inCombat))
@@ -303,7 +303,7 @@ local function MSWA_UpdateSpells()
                                         local ok, rem2 = pcall(function() return (cdInfo.startTime + cdInfo.duration) - GetTime() end)
                                         if ok and type(rem2) == "number" then remForText = rem2 end
                                     end
-                                    MSWA_UpdateCooldownText(btn, remForText)
+                                    MSWA_UpdateCooldownText(btn, remForText, s and s.showDecimal)
                                 end
                             else
                                 MSWA_ClearCooldownFrame(btn.cooldown)
@@ -392,7 +392,7 @@ local function MSWA_UpdateSpells()
                                 if MSWA_UpdateCooldownText then
                                     local glowRem = buffDur - (GetTime() - timerStart)
                                     if glowRem < 0 then glowRem = 0 end
-                                    MSWA_UpdateCooldownText(btn, glowRem)
+                                    MSWA_UpdateCooldownText(btn, glowRem, s and s.showDecimal)
                                 end
                                 btn.icon:SetDesaturated(false)
                                 btn:SetAlpha(ComputeAlpha(s, true, inCombat))
@@ -435,7 +435,7 @@ local function MSWA_UpdateSpells()
                                     local ok, rem2 = pcall(function() return (start + duration) - GetTime() end)
                                     if ok and type(rem2) == "number" then remForText = rem2 end
                                 end
-                                MSWA_UpdateCooldownText(btn, remForText)
+                                MSWA_UpdateCooldownText(btn, remForText, s and s.showDecimal)
                             end
 
                             MSWA_UpdateBuffVisual_Fast(btn, s, nil, true, itemID)

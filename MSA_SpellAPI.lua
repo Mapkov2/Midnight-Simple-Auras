@@ -1,11 +1,11 @@
 -- ########################################################
--- MSA_SpellAPI.lua  (v3 â€“ max performance rewrite)
+-- MSA_SpellAPI.lua  (v3 Ã¢â‚¬â€œ max performance rewrite)
 --
 -- Rules:
---   â€¢ pcall ONLY for Midnight secret-value APIs
---   â€¢ Font paths cached â€“ zero pcall in hot path
---   â€¢ CD API detected once at load time
---   â€¢ All hot-path helpers accept (db, s) â€“ no redundant lookups
+--   Ã¢â‚¬Â¢ pcall ONLY for Midnight secret-value APIs
+--   Ã¢â‚¬Â¢ Font paths cached Ã¢â‚¬â€œ zero pcall in hot path
+--   Ã¢â‚¬Â¢ CD API detected once at load time
+--   Ã¢â‚¬Â¢ All hot-path helpers accept (db, s) Ã¢â‚¬â€œ no redundant lookups
 -- ########################################################
 
 local type, tostring, tonumber, select = type, tostring, tonumber, select
@@ -191,7 +191,7 @@ end
 
 local hasGetRemaining = C_Spell and C_Spell.GetSpellCooldownRemaining
 
--- Spell cooldown values are tainted in Midnight — pcall required for comparisons.
+-- Spell cooldown values are tainted in Midnight â€” pcall required for comparisons.
 -- Returns (remaining, isOnCooldown).
 -- If tainted, remaining=0 but isOnCooldown may still be true (from pcall success on SetCooldown).
 function MSWA_GetSpellGlowRemaining(spellID)
@@ -210,12 +210,12 @@ function MSWA_GetSpellGlowRemaining(spellID)
     elseif ok then
         return 0, false
     end
-    -- pcall failed (tainted) — remaining unknown, but caller should use
+    -- pcall failed (tainted) â€” remaining unknown, but caller should use
     -- IsCooldownActive(btn) for the boolean instead
     return 0, false
 end
 
--- Item cooldowns — also pcall-wrapped for safety
+-- Item cooldowns â€” also pcall-wrapped for safety
 function MSWA_GetItemGlowRemaining(start, duration)
     if not start or not duration then return 0, false end
     local ok, remaining = pcall(function()
@@ -290,10 +290,10 @@ function MSWA_ApplyTextStyle(btn, db, s)
 end
 
 -----------------------------------------------------------
--- Cooldown text (custom FontString) — lightweight + live
+-- Cooldown text (custom FontString) â€” lightweight + live
 -----------------------------------------------------------
 
-local function _MSWA_FormatCooldownShort(sec)
+local function _MSWA_FormatCooldownShort(sec, showDecimal)
     -- Keep formatting secret-safe: comparisons guarded.
     if sec == nil then return nil end
 
@@ -317,12 +317,15 @@ local function _MSWA_FormatCooldownShort(sec)
     if sec >= 10 then
         return tostring(math.floor(sec + 0.5))
     end
-    -- < 10s: show 1 decimal
-    local v = math.floor(sec * 10 + 0.5) / 10
-    return tostring(v)
+    -- < 10s: show 1 decimal only if enabled
+    if showDecimal then
+        local v = math.floor(sec * 10 + 0.5) / 10
+        return tostring(v)
+    end
+    return tostring(math.floor(sec + 0.5))
 end
 
-function MSWA_UpdateCooldownText(btn, remaining)
+function MSWA_UpdateCooldownText(btn, remaining, showDecimal)
     if not btn then return end
     local fs = btn.cooldownText or btn.count
     if not fs then return end
@@ -331,7 +334,7 @@ function MSWA_UpdateCooldownText(btn, remaining)
     if remaining ~= nil then
         local ok, shouldShow = pcall(function() return remaining > 0 end)
         if ok and shouldShow then
-            txt = _MSWA_FormatCooldownShort(remaining)
+            txt = _MSWA_FormatCooldownShort(remaining, showDecimal)
         end
     end
 
@@ -375,7 +378,7 @@ function MSWA_ApplyStackStyle(btn, s)
 end
 
 -----------------------------------------------------------
--- Buff visual (stacks/charges) â€“ accepts db + s
+-- Buff visual (stacks/charges) Ã¢â‚¬â€œ accepts db + s
 -----------------------------------------------------------
 
 function MSWA_UpdateBuffVisual_Fast(btn, s, spellID, isItem, itemID)
@@ -407,7 +410,7 @@ function MSWA_UpdateBuffVisual_Fast(btn, s, spellID, isItem, itemID)
 end
 
 -----------------------------------------------------------
--- Conditional text color â€“ accepts s directly
+-- Conditional text color Ã¢â‚¬â€œ accepts s directly
 -----------------------------------------------------------
 
 local function FindCooldownText(cd)
@@ -458,7 +461,7 @@ function MSWA_ApplyConditionalTextColor_Fast(btn, s, db, remaining, isOnCooldown
 end
 
 -----------------------------------------------------------
--- Swipe darken â€“ accepts s directly
+-- Swipe darken Ã¢â‚¬â€œ accepts s directly
 -----------------------------------------------------------
 
 function MSWA_ApplySwipeDarken_Fast(btn, s)

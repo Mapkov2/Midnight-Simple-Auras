@@ -372,6 +372,9 @@ MSWA_UpdateDetailPanel = function()
         -- "Swipe darkens on loss" == reverse swipe direction.
         f.swipeDarkenCheck:SetChecked((s and s.swipeDarken) and true or false)
     end
+    if f.showDecimalCheck then
+        f.showDecimalCheck:SetChecked((s and s.showDecimal) and true or false)
+    end
 
     -- Sync alpha sliders
     if f.cdAlphaSlider then
@@ -1879,9 +1882,22 @@ local function MSWA_CreateOptionsFrame()
         MSWA_RequestUpdateSpells()
     end)
 
+    -- Show decimal (one decimal place for timers < 10s)
+    f.showDecimalCheck = CreateFrame("CheckButton", nil, dp, "ChatConfigCheckButtonTemplate")
+    f.showDecimalCheck:SetPoint("TOPLEFT", f.swipeDarkenCheck, "BOTTOMLEFT", 0, -4)
+    f.showDecimalLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.showDecimalLabel:SetPoint("LEFT", f.showDecimalCheck, "RIGHT", 2, 0)
+    f.showDecimalLabel:SetText("Show decimal (e.g. 3.7 instead of 4)")
+    f.showDecimalCheck:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.showDecimal = self:GetChecked() and true or nil
+        MSWA_RequestUpdateSpells()
+    end)
+
     -- ======= Alpha Sliders Section =======
     local alphaSep = dp:CreateTexture(nil, "ARTWORK")
-    alphaSep:SetPoint("TOPLEFT", f.swipeDarkenCheck, "BOTTOMLEFT", 4, -10)
+    alphaSep:SetPoint("TOPLEFT", f.showDecimalCheck, "BOTTOMLEFT", 4, -10)
     alphaSep:SetSize(400, 1); alphaSep:SetColorTexture(1, 1, 1, 0.12)
 
     local alphaTitle = dp:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2202,7 +2218,7 @@ local function MSWA_CreateOptionsFrame()
     f.tc2ColorSwatch = f.tc2ColorBtn:CreateTexture(nil, "ARTWORK"); f.tc2ColorSwatch:SetAllPoints(true); f.tc2ColorSwatch:SetColorTexture(1, 0, 0, 1)
     local tc2Border = f.tc2ColorBtn:CreateTexture(nil, "BORDER"); tc2Border:SetPoint("TOPLEFT", f.tc2ColorBtn, "TOPLEFT", -1, 1); tc2Border:SetPoint("BOTTOMRIGHT", f.tc2ColorBtn, "BOTTOMRIGHT", 1, -1); tc2Border:SetColorTexture(0, 0, 0, 1)
 
-    -- Condition button (cycles: TIMER_BELOW ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ TIMER_ABOVE)
+    -- Condition button (cycles: TIMER_BELOW ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ TIMER_ABOVE)
     f.tc2CondLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.tc2CondLabel:SetPoint("LEFT", f.tc2ColorBtn, "RIGHT", 16, 0)
     f.tc2CondLabel:SetText("When:")
@@ -2422,7 +2438,7 @@ local function MSWA_CreateOptionsFrame()
     f.btnIDInfo:SetScript("OnClick", function(self, button)
         local db = MSWA_GetDB()
         if button == "RightButton" then
-            -- Right-click: cycle modes (Both Ã¢â€ â€™ Spell only Ã¢â€ â€™ Icon only Ã¢â€ â€™ Off)
+            -- Right-click: cycle modes (Both ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ Spell only ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ Icon only ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ Off)
             if db.showSpellID and db.showIconID then
                 db.showSpellID = true; db.showIconID = false
                 MSWA_Print("Tooltip: Spell/Item ID only")
