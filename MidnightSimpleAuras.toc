@@ -22,3 +22,5 @@ MSA_UpdateEngine.lua
 MSA_ExportImport.lua
 MSA_Options.lua
 MSA_PlayerBuffs.lua
+MSA_Slash_GroupExport.lua
+MSA_ImportExport_Groups.lua
