@@ -19,18 +19,28 @@ function MSWA_GetAnchorFrame(settings)
     settings = settings or {}
     local anchorName = settings.anchorFrame
 
+    -- Default: anchor to our main frame (legacy behavior)
     if not anchorName or anchorName == "" then
-        return MSWA.frame
+        return MSWA.frame or UIParent
     end
 
-    if anchorName == "CooldownManager" or anchorName == "EssentialCooldownViewer" then
-        local ecv = _G["EssentialCooldownViewer"]
-        if ecv and ecv:IsShown() then return ecv end
+    if anchorName == "UIParent" then
         return UIParent
     end
 
+    -- Legacy convenience labels
+    if anchorName == "CooldownManager" or anchorName == "EssentialCooldownViewer" then
+        local f = _G["EssentialCooldownViewer"] or _G["CooldownManager"]
+        if f then return f end
+        return UIParent
+    end
+
+    -- IMPORTANT: do NOT require IsShown() here.
+    -- Hidden frames can still be valid anchors, and this must work with /fstack.
     local f = _G[anchorName]
-    if f and f:IsShown() then return f end
+    if f then
+        return f
+    end
 
     return UIParent
 end
@@ -607,13 +617,17 @@ btn.spellID = nil
             local gid = MSWA_GetAuraGroup(key)
             local grp = gid and db.groups and db.groups[gid] or nil
             if grp then
-                local ax, ay = MSWA.frame:GetCenter()
+                local anchorFrame = MSWA_GetAnchorFrame({ anchorFrame = grp.anchorFrame })
+                if not anchorFrame then anchorFrame = MSWA.frame end
+                local ax, ay = anchorFrame:GetCenter()
+                if not ax then ax, ay = UIParent:GetCenter() end
                 settings.x = (bx - ax) - (grp.x or 0)
                 settings.y = (by - ay) - (grp.y or 0)
                 settings.anchorFrame = nil
             else
                 local anchorFrame = MSWA_GetAnchorFrame(settings)
                 local ax, ay = anchorFrame:GetCenter()
+                if not ax then ax, ay = UIParent:GetCenter() end
                 settings.x = bx - ax
                 settings.y = by - ay
             end

@@ -14,6 +14,7 @@ local pairs, type, pcall, tonumber, tostring = pairs, type, pcall, tonumber, tos
 local GetTime         = GetTime
 local GetItemCooldown = GetItemCooldown
 local GetItemIcon     = GetItemIcon
+local wipe            = wipe or table.wipe
 
 -----------------------------------------------------------
 -- Constants
@@ -90,15 +91,66 @@ end
 -- PositionButton (top-level, zero closure allocation)
 -----------------------------------------------------------
 
-local function PositionButton(btn, s, key, idx, frame, ICON_SIZE, ICON_SPACE, db)
+local function PositionButton(btn, s, key, idx, frame, ICON_SIZE, ICON_SPACE, db, groupCtx)
     local gid = MSWA_GetAuraGroup and MSWA_GetAuraGroup(key) or (_G.GetAuraGroup and _G.GetAuraGroup(key) or nil)
     local group = gid and db.groups and db.groups[gid] or nil
+
     if group then
-        local gx = group.x or 0
-        local gy = group.y or 0
-        btn:SetPoint("CENTER", frame, "CENTER", (s and s.x or 0) + gx, (s and s.y or 0) + gy)
+        -- Groups are master anchors: icons inside a group anchor to the group's anchor frame.
+        local gf = nil
+
+        if groupCtx then
+            groupCtx.used[gid] = true
+            if not groupCtx.applied[gid] and type(MSWA_ApplyGroupAnchorFrame) == "function" then
+                gf = MSWA_ApplyGroupAnchorFrame(gid, group)
+                groupCtx.frames[gid] = gf
+                groupCtx.applied[gid] = true
+            else
+                gf = groupCtx.frames[gid]
+                if not gf and type(MSWA_GetOrCreateGroupAnchorFrame) == "function" then
+                    gf = MSWA_GetOrCreateGroupAnchorFrame(gid)
+                    groupCtx.frames[gid] = gf
+                end
+            end
+        elseif type(MSWA_ApplyGroupAnchorFrame) == "function" then
+            gf = MSWA_ApplyGroupAnchorFrame(gid, group)
+        end
+
+        if not gf then gf = frame end
+
+        btn:SetPoint("CENTER", gf, "CENTER", (s and s.x or 0), (s and s.y or 0))
+
         local size = group.size or ICON_SIZE
-        btn:SetSize((s and s.width) or size, (s and s.height) or size)
+        local w = (s and s.width) or size
+        local h = (s and s.height) or size
+        btn:SetSize(w, h)
+
+        -- Update group bounds for /fstack anchoring (frame footprint follows the group's icons)
+        if groupCtx then
+            local b = groupCtx.bounds[gid]
+            if not b then
+                b = { init = false, minL = 0, maxR = 0, minB = 0, maxT = 0 }
+                groupCtx.bounds[gid] = b
+            end
+            local x = (s and s.x) or 0
+            local y = (s and s.y) or 0
+            local halfW = w * 0.5
+            local halfH = h * 0.5
+            local left  = x - halfW
+            local right = x + halfW
+            local bot   = y - halfH
+            local top   = y + halfH
+            if not b.init then
+                b.init = true
+                b.minL = left; b.maxR = right
+                b.minB = bot;  b.maxT = top
+            else
+                if left  < b.minL then b.minL = left end
+                if right > b.maxR then b.maxR = right end
+                if bot   < b.minB then b.minB = bot end
+                if top   > b.maxT then b.maxT = top end
+            end
+        end
     else
         local anchorFrame = MSWA_GetAnchorFrame(s or {})
         local lx = s and s.x or 0
@@ -117,6 +169,7 @@ local function PositionButton(btn, s, key, idx, frame, ICON_SIZE, ICON_SPACE, db
         end
     end
 end
+
 
 -----------------------------------------------------------
 -- Inline helpers
@@ -184,6 +237,17 @@ local function MSWA_UpdateSpells()
     local autoBuff      = MSWA._autoBuff
     local icons         = MSWA.icons
 
+    -- Group anchors (master anchors for icons inside groups)
+    -- Reuse tables to avoid churn in the update throttle.
+    local groupCtx = MSWA._groupLayoutCtx
+    if not groupCtx then
+        groupCtx = { applied = {}, frames = {}, bounds = {}, used = {} }
+        MSWA._groupLayoutCtx = groupCtx
+    end
+    wipe(groupCtx.applied)
+    wipe(groupCtx.bounds)
+    wipe(groupCtx.used)
+
     -- Selected-aura preview: when options are open and an aura is selected,
     -- always show that aura so the user can see what they're editing.
     local optFrame      = MSWA.optionsFrame
@@ -245,12 +309,13 @@ local function MSWA_UpdateSpells()
                             end
 
                             if showBuff then
-                                PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
+                                PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db, groupCtx)
                                 MSWA_ApplyCooldownFrame(btn.cooldown, timerStart, buffDur, 1)
                                 -- Custom cooldown text (styleable)
                                 btn.icon:SetDesaturated(false)
                                 btn:SetAlpha(ComputeAlpha(s, true, inCombat))
                                 ClearStackAndCount(btn)
+                                MSWA_UpdateBuffVisual_Fast(btn, s, spellID, false, nil)
 
                                 local glowRem = buffDur - (GetTime() - timerStart)
                                 if glowRem < 0 then glowRem = 0 end
@@ -265,11 +330,12 @@ local function MSWA_UpdateSpells()
                                 index = index + 1
 
                             elseif previewMode or key == selectedKey then
-                                PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
+                                PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db, groupCtx)
                                 MSWA_ClearCooldownFrame(btn.cooldown)
                                 btn.icon:SetDesaturated(false)
                                 btn:SetAlpha(ComputeAlpha(s, false, inCombat))
                                 ClearStackAndCount(btn)
+                                MSWA_UpdateBuffVisual_Fast(btn, s, spellID, false, nil)
                                 MSWA_StopGlow(btn)
                                 index = index + 1
                             else
@@ -278,16 +344,14 @@ local function MSWA_UpdateSpells()
 
                         else
                             -- ========== NORMAL SPELL MODE ==========
-                            PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
+                            PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db, groupCtx)
 
                             local cdInfo = C_Spell.GetSpellCooldown(spellID)
                             if cdInfo then
                                 local exp = cdInfo.expirationTime
-                                local remForText = nil
                                 if hasGetCDRemaining then
                                     local rem = C_Spell.GetSpellCooldownRemaining(spellID)
                                     if type(rem) == "number" then
-                                        remForText = rem
                                         exp = GetTime() + rem
                                     end
                                 end
@@ -296,51 +360,43 @@ local function MSWA_UpdateSpells()
                                 MSWA_ClearCooldownFrame(btn.cooldown)
                             end
 
-                            if showBuff then
-                                PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
-                                MSWA_ApplyCooldownFrame(btn.cooldown, timerStart, buffDur, 1)
-                                btn.icon:SetDesaturated(false)
-                                btn:SetAlpha(ComputeAlpha(s, true, inCombat))
-                                ClearStackAndCount(btn)
+                            -- Buff visual (stacks/charges) — respects stackShowMode
+                            MSWA_UpdateBuffVisual_Fast(btn, s, spellID, false, nil)
 
-                                local glowRem = buffDur - (GetTime() - timerStart)
-                                if glowRem < 0 then glowRem = 0 end
-                                local gs = s and s.glow
-                                if gs and gs.enabled then
-                                    MSWA_UpdateGlow_Fast(btn, gs, glowRem, glowRem > 0)
-                                elseif btn._msaGlowActive then
-                                    MSWA_StopGlow(btn)
-                                end
-                                MSWA_ApplyConditionalTextColor_Fast(btn, s, db, glowRem, glowRem > 0)
-                                MSWA_ApplySwipeDarken_Fast(btn, s)
-                                index = index + 1
-
-                            elseif previewMode or key == selectedKey then
-                                PositionButton(btn, s, key, index, frame, ICON_SIZE, ICON_SPACE, db)
-                                MSWA_ClearCooldownFrame(btn.cooldown)
-                            end
-
-                            MSWA_UpdateBuffVisual_Fast(btn, s, nil, true, itemID)
+                            local onCD = MSWA_IsCooldownActive(btn)
 
                             if s and s.grayOnCooldown then
-                                btn.icon:SetDesaturated(MSWA_IsCooldownActive(btn))
+                                btn.icon:SetDesaturated(onCD)
                             else
                                 btn.icon:SetDesaturated(false)
                             end
 
-                            local glowOnCD = MSWA_IsCooldownActive(btn)
-                            local glowRem  = MSWA_GetItemGlowRemaining(start, duration)
+                            -- Remaining time is only needed for timer-conditions (glow/text color)
+                            local rem = 0
+                            if onCD and s then
+                                local need = false
+                                local gs2 = s.glow
+                                if (gs2 and gs2.enabled) or s.textColor2Enabled then
+                                    need = true
+                                end
+                                if need then
+                                    local r = select(1, MSWA_GetSpellGlowRemaining(spellID))
+                                    if type(r) == "number" and r > 0 then
+                                        rem = r
+                                    end
+                                end
+                            end
 
                             -- Alpha: combat state + cooldown
-                            btn:SetAlpha(ComputeAlpha(s, glowOnCD, inCombat))
+                            btn:SetAlpha(ComputeAlpha(s, onCD, inCombat))
 
                             local gs = s and s.glow
                             if gs and gs.enabled then
-                                MSWA_UpdateGlow_Fast(btn, gs, glowRem, glowOnCD)
+                                MSWA_UpdateGlow_Fast(btn, gs, rem, onCD)
                             elseif btn._msaGlowActive then
                                 MSWA_StopGlow(btn)
                             end
-                            MSWA_ApplyConditionalTextColor_Fast(btn, s, db, glowRem, glowOnCD)
+                            MSWA_ApplyConditionalTextColor_Fast(btn, s, db, rem, onCD)
                             MSWA_ApplySwipeDarken_Fast(btn, s)
 
                             index = index + 1
@@ -349,6 +405,28 @@ local function MSWA_UpdateSpells()
                 end -- tex
             end -- enabled
         end
+    end
+
+    -----------------------------------------------------------
+    -- 2.5) Finalize group anchor footprints (for /fstack anchoring)
+    -----------------------------------------------------------
+    if groupCtx and next(groupCtx.used) ~= nil then
+        for gid, b in pairs(groupCtx.bounds) do
+            if b and b.init then
+                local gf = groupCtx.frames[gid]
+                if gf then
+                    local w = b.maxR - b.minL
+                    local h = b.maxT - b.minB
+                    if w < 1 then w = 1 end
+                    if h < 1 then h = 1 end
+                    gf:SetSize(w, h)
+                end
+            end
+        end
+    end
+
+    if type(MSWA_HideUnusedGroupAnchorFrames) == "function" then
+        MSWA_HideUnusedGroupAnchorFrames(groupCtx and groupCtx.used)
     end
 
     -----------------------------------------------------------

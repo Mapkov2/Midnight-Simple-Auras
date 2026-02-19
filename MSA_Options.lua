@@ -284,7 +284,18 @@ MSWA_UpdateDetailPanel = function()
     local y = s.y or 0
     local w = s.width  or MSWA.ICON_SIZE
     local h = s.height or MSWA.ICON_SIZE
-    local a = s.anchorFrame or ""
+    local a
+    do
+        -- Show/store the *effective* anchor name:
+        -- If this aura is inside a group, the group is the master anchor.
+        local gid2 = (MSWA_GetAuraGroup and MSWA_GetAuraGroup(key)) or nil
+        if gid2 then
+            local g2 = (db.groups or {})[gid2]
+            a = (g2 and g2.anchorFrame) or ""
+        else
+            a = s.anchorFrame or ""
+        end
+    end
 
     if f.rightTitle then f.rightTitle:SetText(name or "Selected Aura") end
 
@@ -630,7 +641,7 @@ local function MSWA_CreateOptionsFrame()
     f.title:SetText("Midnight Simple Auras")
 
     f.versionText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    f.versionText:SetText("Version 1.27")
+    f.versionText:SetText("Version 1.30")
     -- Anchor against the close button when available so it always stays top-right.
     local closeBtn = f.CloseButton or _G[f:GetName() .. "CloseButton"]
     if closeBtn then
@@ -1337,13 +1348,21 @@ local function MSWA_CreateOptionsFrame()
     local gpSizeLabel = f.groupPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal"); gpSizeLabel:SetPoint("TOPLEFT", gpXLabel, "BOTTOMLEFT", 0, -18); gpSizeLabel:SetText("Icon size")
     f.groupSizeEdit = CreateFrame("EditBox", nil, f.groupPanel, "InputBoxTemplate"); f.groupSizeEdit:SetAutoFocus(false); f.groupSizeEdit:SetSize(80, 22); f.groupSizeEdit:SetPoint("LEFT", gpSizeLabel, "RIGHT", 10, 0)
 
+    local gpAnchorLabel = f.groupPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal"); gpAnchorLabel:SetPoint("TOPLEFT", gpSizeLabel, "BOTTOMLEFT", 0, -18); gpAnchorLabel:SetText("Anchor Frame")
+    f.groupAnchorEdit = CreateFrame("EditBox", nil, f.groupPanel, "InputBoxTemplate"); f.groupAnchorEdit:SetAutoFocus(false); f.groupAnchorEdit:SetSize(220, 22); f.groupAnchorEdit:SetPoint("LEFT", gpAnchorLabel, "RIGHT", 10, 0)
+    f.groupAnchorEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyGroupSettings() end)
+    f.groupAnchorEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
     local function ApplyGroupSettings()
         local db = MSWA_GetDB(); local gid = MSWA.selectedGroupID; local g = gid and db.groups and db.groups[gid]; if not g then return end
         local x = tonumber(f.groupXEdit:GetText()) or g.x or 0
         local y = tonumber(f.groupYEdit:GetText()) or g.y or 0
         local size = tonumber(f.groupSizeEdit:GetText()) or g.size or MSWA.ICON_SIZE
+        local anchorFrame = f.groupAnchorEdit and f.groupAnchorEdit:GetText() or ""
+        anchorFrame = anchorFrame and anchorFrame:gsub("^%s+", ""):gsub("%s+$", "") or ""
         if size < 8 then size = 8 end
         g.x = x; g.y = y
+        g.anchorFrame = (anchorFrame ~= "" and anchorFrame) or nil
         local oldSize = g.size or MSWA.ICON_SIZE; if oldSize < 1 then oldSize = MSWA.ICON_SIZE end
         local ratio = (oldSize and oldSize ~= 0) and (size / oldSize) or 1
         if ratio and ratio ~= 1 and db.auraGroups and db.spellSettings then
@@ -1365,11 +1384,13 @@ local function MSWA_CreateOptionsFrame()
         editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     end
     HookAutoApply(f.groupXEdit); HookAutoApply(f.groupYEdit); HookAutoApply(f.groupSizeEdit)
+    if f.groupAnchorEdit then HookAutoApply(f.groupAnchorEdit) end
 
     function f.groupPanel:Sync()
         local db = MSWA_GetDB(); local gid = MSWA.selectedGroupID; local g = gid and db.groups and db.groups[gid]; if not g then return end
         f.groupNameEdit:SetText(g.name or ""); f.groupXEdit:SetText(tostring(g.x or 0))
         f.groupYEdit:SetText(tostring(g.y or 0)); f.groupSizeEdit:SetText(tostring(g.size or MSWA.ICON_SIZE))
+        if f.groupAnchorEdit then f.groupAnchorEdit:SetText(g.anchorFrame or "") end
     end
 
     -- =========================================================
@@ -2326,7 +2347,25 @@ local function MSWA_CreateOptionsFrame()
         s.x = x; s.y = y; s.width = w; s.height = h; db.spellSettings[key] = s; MSWA_RequestUpdateSpells()
     end
     local function ApplyAnchor() local key = MSWA.selectedSpellID; if not key then return end; local db = MSWA_GetDB(); db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[key] or {}
-        local a = f.detailA:GetText(); if a == "" then a = nil end; s.anchorFrame = a; db.spellSettings[key] = s; MSWA_RequestUpdateSpells(); MSWA_UpdateDetailPanel()
+        local a = f.detailA:GetText() or ""
+        a = tostring(a):gsub("^%s+", ""):gsub("%s+$", "")
+        if a == "" then a = nil end
+
+        -- If this aura belongs to a group, the group is the master anchor.
+        local gid = (MSWA_GetAuraGroup and MSWA_GetAuraGroup(key)) or nil
+        if gid and db.groups and db.groups[gid] then
+            local g = db.groups[gid]
+            g.anchorFrame = a
+            -- Keep per-aura anchor cleared while grouped (prevents confusion/overrides).
+            s.anchorFrame = nil
+            db.groups[gid] = g
+        else
+            s.anchorFrame = a
+        end
+
+        db.spellSettings[key] = s
+        MSWA_RequestUpdateSpells()
+        MSWA_UpdateDetailPanel()
     end
     local function HookBox(box, applyFunc) if not box then return end; box:SetScript("OnEnterPressed", function(self) self:ClearFocus(); applyFunc() end); box:SetScript("OnEditFocusLost", function() applyFunc() end) end
     HookBox(f.detailX, ApplyDisplay); HookBox(f.detailY, ApplyDisplay); HookBox(f.detailW, ApplyDisplay); HookBox(f.detailH, ApplyDisplay); HookBox(f.detailA, ApplyAnchor)

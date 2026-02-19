@@ -23,10 +23,13 @@ function MSWA_CreateGroup(name)
 
     local gid = MSWA_NewGroupID()
     db.groups[gid] = {
-        name = name or ("Group %d"):format(db._groupCounter or 0),
-        x    = 0,
-        y    = 0,
-        size = MSWA.ICON_SIZE,
+        name       = name or ("Group %d"):format(db._groupCounter or 0),
+        x          = 0,
+        y          = 0,
+        size       = MSWA.ICON_SIZE,
+        anchorFrame = nil, -- global frame name (string) or nil => MSWA.frame
+        point      = "CENTER",
+        relPoint   = "CENTER",
     }
     tinsert(db.groupOrder, gid)
     return gid
@@ -91,8 +94,13 @@ function MSWA_SetAuraGroup(key, gid)
         local old = db.auraGroups[key]
         local group = old and db.groups and db.groups[old] or nil
         if group then
+            -- Preserve on-screen position when removing from a group:
+            -- group offsets are relative to the group's anchor frame.
             s.x = (s.x or 0) + (group.x or 0)
             s.y = (s.y or 0) + (group.y or 0)
+            if group.anchorFrame and group.anchorFrame ~= "" then
+                s.anchorFrame = group.anchorFrame
+            end
         end
         db.auraGroups[key] = nil
     end

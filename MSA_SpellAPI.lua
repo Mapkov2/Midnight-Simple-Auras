@@ -332,11 +332,23 @@ function MSWA_UpdateBuffVisual_Fast(btn, s, spellID, isItem, itemID)
     end
     if spellID then
         local auraData = MSWA_GetPlayerAuraDataBySpellID(spellID)
-        local minCount = (showMode == "show") and 0 or 1
-        local stackText = MSWA_GetAuraStackText(auraData, minCount)
-        if not stackText then stackText = MSWA_GetSpellChargesText(spellID) end
-        if stackText then target:SetText(stackText); target:Show()
-        else target:SetText(""); target:Hide() end
+
+        -- Blizzard-style: show stacks only for 2+ in AUTO; for forced SHOW we
+        -- still show "1" if the aura exists (some builds clamp minCount to 2).
+        local stackText = MSWA_GetAuraStackText(auraData, 2)
+        if (not stackText) and showMode == "show" and auraData then
+            stackText = "1"
+        end
+
+        if not stackText then
+            stackText = MSWA_GetSpellChargesText(spellID)
+        end
+
+        if stackText then
+            target:SetText(stackText); target:Show()
+        else
+            target:SetText(""); target:Hide()
+        end
         return
     end
     target:SetText(""); target:Hide()
