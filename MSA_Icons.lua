@@ -636,6 +636,11 @@ btn.spellID = nil
             settings.height = self:GetHeight()
             db.spellSettings[key] = settings
 
+            -- Keep stored group order in sync with manual positioning
+            if gid and type(MSWA_SyncGroupMembersFromPositions) == "function" then
+                MSWA_SyncGroupMembersFromPositions(gid)
+            end
+
             if MSWA.optionsFrame and MSWA.optionsFrame:IsShown() and MSWA.selectedSpellID == key then
                 MSWA.optionsFrame.detailX:SetText(("%d"):format(settings.x or 0))
                 MSWA.optionsFrame.detailY:SetText(("%d"):format(settings.y or 0))

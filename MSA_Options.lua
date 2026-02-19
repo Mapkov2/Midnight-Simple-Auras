@@ -154,6 +154,41 @@ local function MSWA_BuildListEntries()
     local ids = MSWA_BuildSortedTrackedIDs()
     local grouped, ungrouped, notLoaded = {}, {}, {}
 
+    local function OrderGroupList(gid, list)
+        if not list or #list <= 1 then return list end
+
+        local members = nil
+        if type(MSWA_EnsureGroupMembers) == "function" then
+            members = MSWA_EnsureGroupMembers(gid)
+        elseif db.groupMembers and type(db.groupMembers[gid]) == "table" then
+            members = db.groupMembers[gid]
+        end
+        if type(members) ~= "table" or #members == 0 then return list end
+
+        local present = {}
+        for i = 1, #list do
+            present[list[i]] = true
+        end
+
+        local out = {}
+        for i = 1, #members do
+            local k = members[i]
+            if present[k] then
+                tinsert(out, k)
+                present[k] = nil
+            end
+        end
+
+        -- Fallback: append any keys not yet in groupMembers (legacy DB)
+        for i = 1, #list do
+            local k = list[i]
+            if present[k] then
+                tinsert(out, k)
+            end
+        end
+        return out
+    end
+
     local function IsAuraLoadedNow(key)
         local s = nil
         if db and db.spellSettings then
@@ -186,7 +221,7 @@ local function MSWA_BuildListEntries()
             if g then
                 local groupEntry = { entryType = 'GROUP', groupID = gid, groupStart = true }
                 tinsert(entries, groupEntry)
-                local list = grouped[gid]
+                local list = OrderGroupList(gid, grouped[gid])
                 if list and #list > 0 then
                     for idx2, key in ipairs(list) do
                         local auraEntry = { entryType = 'AURA', key = key, groupID = gid, indent = 16 }
@@ -750,7 +785,9 @@ local function MSWA_CreateOptionsFrame()
         inlineEdit._renameGroupID = groupID
         inlineEdit:ClearAllPoints()
         inlineEdit:SetPoint("LEFT", row.icon, "RIGHT", 4 + (row.indent or 0), 0)
-        inlineEdit:SetPoint("RIGHT", row.remove, "LEFT", -2, 0)
+        -- If move arrows are visible for this row, anchor to the left-most button to avoid overlap
+        local rightAnchor = (row.up and row.up:IsShown()) and row.up or row.remove
+        inlineEdit:SetPoint("RIGHT", rightAnchor, "LEFT", -2, 0)
         inlineEdit:SetText(currentText or "")
         inlineEdit:Show()
         inlineEdit:SetFocus()
@@ -763,6 +800,63 @@ local function MSWA_CreateOptionsFrame()
     local DOUBLECLICK_THRESHOLD = 0.35
 
     f.rows = {}
+
+
+-- Use simple '<' '>' glyphs for move controls (font-safe) and rotate them when supported.
+-- We force the font + centering so the glyph is clearly visible and matches the 'X' button style.
+local function MSWA_StyleChevronButton(btn, ch, rot)
+    if not btn then return end
+
+    -- Match the delete button footprint
+    btn:SetSize(24, 20)
+
+    -- Use larger font objects (fallbacks are safe)
+    if btn.SetNormalFontObject and GameFontNormalLarge then btn:SetNormalFontObject(GameFontNormalLarge) end
+    if btn.SetHighlightFontObject then
+        btn:SetHighlightFontObject(_G.GameFontHighlightLarge or _G.GameFontHighlight or _G.GameFontNormalLarge)
+    end
+    if btn.SetDisabledFontObject then
+        btn:SetDisabledFontObject(_G.GameFontDisableLarge or _G.GameFontDisable or _G.GameFontNormalLarge)
+    end
+
+    btn:SetText(ch or ">")
+
+    local fs = (btn.GetFontString and btn:GetFontString()) or nil
+    if fs then
+        -- Bigger glyph so '<'/'>' are readable inside 24x20 like the 'X'
+        local fontPath = STANDARD_TEXT_FONT or (fs.GetFont and select(1, fs:GetFont())) or "Fonts\\FRIZQT__.TTF"
+        if fs.SetFont then fs:SetFont(fontPath, 16, "OUTLINE") end
+        if fs.ClearAllPoints then fs:ClearAllPoints() end
+        if fs.SetPoint then fs:SetPoint("CENTER", btn, "CENTER", 0, -1) end
+        if fs.SetJustifyH then fs:SetJustifyH("CENTER") end
+        if fs.SetJustifyV then fs:SetJustifyV("MIDDLE") end
+        if rot and fs.SetRotation then fs:SetRotation(rot) end
+    end
+end
+
+-- Layout list row text so it never overlaps the right-side buttons (remove + optional up/down)
+local function MSWA_LayoutListRowText(row)
+    if not row or not row.text or not row.icon then return end
+
+    row.text:ClearAllPoints()
+    row.text:SetPoint("LEFT", row.icon, "RIGHT", 6 + (row.indent or 0), 0)
+
+    local rightAnchor = nil
+    if row.up and row.up:IsShown() then
+        rightAnchor = row.up
+    elseif row.down and row.down:IsShown() then
+        rightAnchor = row.down
+    elseif row.remove and row.remove:IsShown() then
+        rightAnchor = row.remove
+    end
+
+    if rightAnchor then
+        row.text:SetPoint("RIGHT", rightAnchor, "LEFT", -4, 0)
+    else
+        row.text:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+    end
+end
+
     for i = 1, MAX_VISIBLE_ROWS do
         local row = CreateFrame("Button", "MSWA_AuraRow" .. i, listPanel)
         row:SetSize(282, rowHeight); row:SetPoint("TOPLEFT", 8, -24 - (i - 1) * rowHeight)
@@ -770,7 +864,8 @@ local function MSWA_CreateOptionsFrame()
 
         row.icon = row:CreateTexture(nil, "ARTWORK"); row.icon:SetSize(20, 20); row.icon:SetPoint("LEFT")
         row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        row.text:SetPoint("LEFT", row.icon, "RIGHT", 6, 0); row.text:SetJustifyH("LEFT"); row.text:SetWidth(210)
+        row.text:SetPoint("LEFT", row.icon, "RIGHT", 6, 0); row.text:SetJustifyH("LEFT");
+        -- Leave room for the up/down arrows + delete button on the right
 
         row.sepTop = row:CreateTexture(nil, "BORDER"); row.sepTop:SetColorTexture(1, 1, 1, 0.12)
         row.sepTop:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0); row.sepTop:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, 0)
@@ -781,7 +876,20 @@ local function MSWA_CreateOptionsFrame()
         row.sepBottom:SetHeight(1); row.sepBottom:Hide()
 
         row.remove = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.remove:SetSize(24, 20); row.remove:SetPoint("RIGHT"); row.remove:SetText("X")
+        row.remove:SetSize(24, 20); row.remove:SetPoint("RIGHT", -2, 0); row.remove:SetText("X")
+
+        -- Group member order arrows (shown only for auras that are inside a group)
+        row.down = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.down:SetSize(24, 20)
+        row.down:SetPoint("RIGHT", row.remove, "LEFT", -2, 0)
+        MSWA_StyleChevronButton(row.down, ">", 1.57079632679) -- rotated > (down)
+        row.down:Hide()
+
+        row.up = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.up:SetSize(24, 20)
+        row.up:SetPoint("RIGHT", row.down, "LEFT", -2, 0)
+        MSWA_StyleChevronButton(row.up, "<", 1.57079632679) -- rotated < (up)
+        row.up:Hide()
 
         row.selectedTex = row:CreateTexture(nil, "BACKGROUND"); row.selectedTex:SetAllPoints(true)
         row.selectedTex:SetColorTexture(1, 1, 0, 0.15); row.selectedTex:Hide()
@@ -803,6 +911,40 @@ local function MSWA_CreateOptionsFrame()
                 MSWA_DeleteGroup(r.groupID)
                 if MSWA.selectedGroupID == r.groupID then MSWA.selectedGroupID = nil end
                 MSWA_RefreshOptionsList(); MSWA_RequestUpdateSpells(); return
+            end
+        end)
+
+        -- Arrow tooltips + reorder handlers
+        local function ArrowTip(self, txt)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(txt, 1, 1, 1)
+            GameTooltip:Show()
+        end
+        row.up:SetScript("OnEnter", function(self) ArrowTip(self, "Move up") end)
+        row.up:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row.down:SetScript("OnEnter", function(self) ArrowTip(self, "Move down") end)
+        row.down:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        row.up:SetScript("OnClick", function(self)
+            if MSWA._isDraggingList then return end
+            local r = self and self.GetParent and self:GetParent() or nil
+            if not r or r.entryType ~= "AURA" then return end
+            if r.key == nil or not r.groupID then return end
+            if type(MSWA_MoveGroupMember) == "function" then
+                MSWA_MoveGroupMember(r.groupID, r.key, -1)
+                if MSWA_RequestUpdateSpells then MSWA_RequestUpdateSpells() end
+                if MSWA_RefreshOptionsList then MSWA_RefreshOptionsList() end
+            end
+        end)
+        row.down:SetScript("OnClick", function(self)
+            if MSWA._isDraggingList then return end
+            local r = self and self.GetParent and self:GetParent() or nil
+            if not r or r.entryType ~= "AURA" then return end
+            if r.key == nil or not r.groupID then return end
+            if type(MSWA_MoveGroupMember) == "function" then
+                MSWA_MoveGroupMember(r.groupID, r.key, 1)
+                if MSWA_RequestUpdateSpells then MSWA_RequestUpdateSpells() end
+                if MSWA_RefreshOptionsList then MSWA_RefreshOptionsList() end
             end
         end)
 
@@ -872,9 +1014,10 @@ local function MSWA_CreateOptionsFrame()
                 row:Show(); row.selectedTex:Hide()
                 if row.sepTop then row.sepTop:Hide() end; if row.sepBottom then row.sepBottom:Hide() end
                 row.remove:Show(); row.icon:SetTexture(nil); row:SetAlpha(1)
+                if row.up then row.up:Hide() end
+                if row.down then row.down:Hide() end
                 if row.icon.SetDesaturated then row.icon:SetDesaturated(false) end
-                row.text:ClearAllPoints()
-                row.text:SetPoint("LEFT", row.icon, "RIGHT", 6 + (row.indent or 0), 0)
+                MSWA_LayoutListRowText(row)
                 if entry.groupStart and row.sepTop then
                     row.sepTop:SetHeight(entry.thickTop and 2 or 1); row.sepTop:Show()
                 end
@@ -888,8 +1031,10 @@ local function MSWA_CreateOptionsFrame()
                     if selectedGroup and selectedGroup == entry.groupID then row.selectedTex:Show() end
                 elseif entry.entryType == "UNGROUPED" then
                     row.text:SetText("Ungrouped"); row.icon:SetTexture(nil); row.remove:Hide()
+                    MSWA_LayoutListRowText(row)
                 elseif entry.entryType == "NOTLOADED" then
                     row.text:SetText("Not Loaded"); row.icon:SetTexture(nil); row.remove:Hide()
+                    MSWA_LayoutListRowText(row)
                 else
                     local key = entry.key
                     local icon = MSWA_GetIconForKey(key)
@@ -913,6 +1058,34 @@ local function MSWA_CreateOptionsFrame()
                     row.icon:SetTexture(icon); row.text:SetText(displayName)
                     row.remove:SetText("X"); row.remove:Show()
                     if selectedKey ~= nil and selectedKey == key then row.selectedTex:Show() end
+
+                    -- Show up/down arrows when this aura belongs to a group
+                    if entry.groupID and row.up and row.down then
+                        row.up:Show(); row.down:Show()
+                        MSWA_LayoutListRowText(row)
+
+                        local members = nil
+                        if type(MSWA_EnsureGroupMembers) == "function" then
+                            members = MSWA_EnsureGroupMembers(entry.groupID)
+                        elseif db.groupMembers and type(db.groupMembers[entry.groupID]) == "table" then
+                            members = db.groupMembers[entry.groupID]
+                        end
+
+                        local idxm, n = nil, (type(members) == "table" and #members or 0)
+                        if type(members) == "table" then
+                            for j = 1, #members do
+                                if members[j] == key then idxm = j; break end
+                            end
+                        end
+
+                        if not idxm or n <= 1 then
+                            row.up:Enable(); row.up:SetAlpha(1)
+                            row.down:Enable(); row.down:SetAlpha(1)
+                        else
+                            if idxm <= 1 then row.up:Disable(); row.up:SetAlpha(0.35) else row.up:Enable(); row.up:SetAlpha(1) end
+                            if idxm >= n then row.down:Disable(); row.down:SetAlpha(0.35) else row.down:Enable(); row.down:SetAlpha(1) end
+                        end
+                    end
                 end
             else
                 row.entryType = nil; row.groupID = nil; row.key = nil; row.indent = 0; row.spellID = nil
@@ -1376,12 +1549,28 @@ local function MSWA_CreateOptionsFrame()
                 end
             end
         end
-        g.size = size; MSWA_RequestUpdateSpells()
+        g.size = size
+        if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
     end
 
     local function HookAutoApply(editBox)
-        editBox:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyGroupSettings() end)
-        editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        if not editBox then return end
+        editBox:SetScript("OnEnterPressed", function(self)
+            self._mswaSkipApply = nil
+            self:ClearFocus() -- triggers OnEditFocusLost
+        end)
+        editBox:SetScript("OnEscapePressed", function(self)
+            self._mswaSkipApply = true
+            self:ClearFocus() -- OnEditFocusLost will resync instead of applying
+        end)
+        editBox:SetScript("OnEditFocusLost", function(self)
+            if self._mswaSkipApply then
+                self._mswaSkipApply = nil
+                if f.groupPanel and f.groupPanel.Sync then f.groupPanel:Sync() end
+                return
+            end
+            ApplyGroupSettings()
+        end)
     end
     HookAutoApply(f.groupXEdit); HookAutoApply(f.groupYEdit); HookAutoApply(f.groupSizeEdit)
     if f.groupAnchorEdit then HookAutoApply(f.groupAnchorEdit) end
@@ -2340,11 +2529,39 @@ local function MSWA_CreateOptionsFrame()
     end)
 
     -- Apply logic + hooks (identical to original)
-    local function ApplyDisplay() local key = MSWA.selectedSpellID; if not key then return end; local db = MSWA_GetDB(); db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[key] or {}
-        local x = tonumber(f.detailX:GetText() or "") or 0; local y = tonumber(f.detailY:GetText() or "") or 0
-        local w = tonumber(f.detailW:GetText() or "") or MSWA.ICON_SIZE; local h = tonumber(f.detailH:GetText() or "") or MSWA.ICON_SIZE
-        if w < 16 then w = 16 end; if h < 16 then h = 16 end; if w > 128 then w = 128 end; if h > 128 then h = 128 end
-        s.x = x; s.y = y; s.width = w; s.height = h; db.spellSettings[key] = s; MSWA_RequestUpdateSpells()
+    local function ApplyDisplay()
+        local key = MSWA.selectedSpellID
+        if not key then return end
+        local db = MSWA_GetDB()
+        db.spellSettings = db.spellSettings or {}
+        local s = db.spellSettings[key] or {}
+
+        local x = tonumber(f.detailX:GetText() or "") or 0
+        local y = tonumber(f.detailY:GetText() or "") or 0
+        local w = tonumber(f.detailW:GetText() or "") or MSWA.ICON_SIZE
+        local h = tonumber(f.detailH:GetText() or "") or MSWA.ICON_SIZE
+
+        if w < 16 then w = 16 end
+        if h < 16 then h = 16 end
+        if w > 128 then w = 128 end
+        if h > 128 then h = 128 end
+
+        s.x = x; s.y = y; s.width = w; s.height = h
+        db.spellSettings[key] = s
+
+        -- Live-apply size instantly to the currently visible icon (no waiting for engine throttle)
+        if MSWA.icons then
+            for i = 1, (MSWA.MAX_ICONS or 0) do
+                local btn = MSWA.icons[i]
+                if btn and btn.spellID and ((MSWA_KeyEquals and MSWA_KeyEquals(btn.spellID, key)) or btn.spellID == key) then
+                    btn:SetSize(w, h)
+                    break
+                end
+            end
+        end
+        if type(MSWA_ReskinMasque) == "function" then MSWA_ReskinMasque() end
+
+        if MSWA_ForceUpdateSpells then MSWA_ForceUpdateSpells() else MSWA_RequestUpdateSpells() end
     end
     local function ApplyAnchor() local key = MSWA.selectedSpellID; if not key then return end; local db = MSWA_GetDB(); db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[key] or {}
         local a = f.detailA:GetText() or ""
@@ -2369,6 +2586,29 @@ local function MSWA_CreateOptionsFrame()
     end
     local function HookBox(box, applyFunc) if not box then return end; box:SetScript("OnEnterPressed", function(self) self:ClearFocus(); applyFunc() end); box:SetScript("OnEditFocusLost", function() applyFunc() end) end
     HookBox(f.detailX, ApplyDisplay); HookBox(f.detailY, ApplyDisplay); HookBox(f.detailW, ApplyDisplay); HookBox(f.detailH, ApplyDisplay); HookBox(f.detailA, ApplyAnchor)
+
+    -- Live-apply width/height while typing (debounced) for instant feedback
+    local function HookLiveNumeric(box, applyFunc, delay)
+        if not (box and applyFunc) then return end
+        if not (C_Timer and C_Timer.After) then return end
+        local token = 0
+        box:HookScript("OnTextChanged", function(self, userInput)
+            if not userInput then return end
+            if not self:HasFocus() then return end
+            local n = tonumber(self:GetText() or "")
+            if not n then return end
+            token = token + 1
+            local my = token
+            C_Timer.After(delay or 0.12, function()
+                if token ~= my then return end
+                if self._mswaSkipApply then return end
+                applyFunc()
+            end)
+        end)
+    end
+    HookLiveNumeric(f.detailW, ApplyDisplay, 0.14)
+    HookLiveNumeric(f.detailH, ApplyDisplay, 0.14)
+
 
     -- Text size +/-
     local function ClampTextSize(v) v = tonumber(v) or 12; if v < 6 then v = 6 end; if v > 48 then v = 48 end; return v end
