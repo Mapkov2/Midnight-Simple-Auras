@@ -365,7 +365,10 @@ MSWA_UpdateDetailPanel = function()
     end
 
     if f.detailName then
-        local abTag = (s and s.auraMode == "AUTOBUFF") and " |cff44ddff[Auto Buff]|r" or ""
+        local abTag = ""
+        if s and s.auraMode == "AUTOBUFF" then
+            abTag = MSWA_IsItemKey(key) and " |cff44ddff[Buff Timer]|r" or " |cff44ddff[Auto Buff]|r"
+        end
         if MSWA_IsDraftKey(key) then f.detailName:SetText("New Aura - ???")
         elseif MSWA_IsItemKey(key) then
             local itemID = MSWA_KeyToItemID(key) or 0
@@ -516,13 +519,22 @@ MSWA_UpdateDetailPanel = function()
     if f.autoBuffCheck then
         local isAutoBuff = (s and s.auraMode == "AUTOBUFF") and true or false
         local isSpellKey = MSWA_IsSpellKey(key)
-        if isSpellKey then
+        local isItemKey  = MSWA_IsItemKey(key)
+        local isDraft    = MSWA_IsDraftKey(key)
+
+        if isSpellKey or isItemKey then
             f.autoBuffCheck:Show(); f.autoBuffLabel:Show()
             f.autoBuffCheck:SetChecked(isAutoBuff)
+            -- Contextual label
+            if isItemKey then
+                f.autoBuffLabel:SetText("|cffffcc00Buff Timer mode|r  (show icon + countdown when used)")
+            else
+                f.autoBuffLabel:SetText("|cffffcc00Auto Buff mode|r  (show icon only while buff is active)")
+            end
         else
             f.autoBuffCheck:Hide(); f.autoBuffLabel:Hide()
         end
-        -- Show duration edit for ANY key with AUTOBUFF (spells via checkbox, items via dropdown)
+        -- Show duration / delay / haste for ANY key with AUTOBUFF
         if f.buffDurLabel then f.buffDurLabel:SetShown(isAutoBuff) end
         if f.buffDurEdit then
             f.buffDurEdit:SetShown(isAutoBuff)
@@ -1928,9 +1940,34 @@ end
     f.idTypeDrop = CreateFrame("Frame", "MSWA_IDTypeDropDown", f.generalPanel, "UIDropDownMenuTemplate"); f.idTypeDrop:SetPoint("LEFT", f.idTypeLabel, "RIGHT", -10, -3); UIDropDownMenu_SetWidth(f.idTypeDrop, 100)
     f.addButton = CreateFrame("Button", nil, f.generalPanel, "UIPanelButtonTemplate"); f.addButton:SetSize(60, 20); f.addButton:SetPoint("LEFT", f.idTypeDrop, "RIGHT", 0, 3); f.addButton:SetText("Add")
     f.hint = f.generalPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.hint:SetPoint("TOPLEFT", f.addLabel, "BOTTOMLEFT", 0, -10); f.hint:SetWidth(420); f.hint:SetJustifyH("LEFT"); f.hint:SetWordWrap(true)
-    f.hint:SetText("Enter an ID from Wowhead etc. Use Type: Item to track items (trinkets). Auto Buff for spell buffs, Item Buff for trinket/item buffs.")
+    f.hint:SetText("Enter an ID or drag a spell / item from Spellbook or Bags onto the drop zone below. Type: Item for trinkets, Auto Buff for spell buffs, Item Buff for trinket/item buffs.")
 
-    f.autoBuffCheck = CreateFrame("CheckButton", nil, f.generalPanel, "ChatConfigCheckButtonTemplate"); f.autoBuffCheck:SetPoint("TOPLEFT", f.hint, "BOTTOMLEFT", -4, -10)
+    -- Drop zone for drag & drop from Spellbook / Inventory
+    f.dropZone = CreateFrame("Button", nil, f.generalPanel)
+    f.dropZone:SetSize(320, 40)
+    f.dropZone:SetPoint("TOPLEFT", f.hint, "BOTTOMLEFT", 0, -6)
+
+    f.dropZone.bg = f.dropZone:CreateTexture(nil, "BACKGROUND")
+    f.dropZone.bg:SetAllPoints()
+    f.dropZone.bg:SetColorTexture(0.12, 0.12, 0.12, 0.7)
+
+    f.dropZone.border = CreateFrame("Frame", nil, f.dropZone, "BackdropTemplate")
+    f.dropZone.border:SetAllPoints()
+    f.dropZone.border:SetBackdrop({ edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 14, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+    f.dropZone.border:SetBackdropBorderColor(0.5, 0.5, 0.5, 0.8)
+
+    f.dropZone.icon = f.dropZone:CreateTexture(nil, "ARTWORK")
+    f.dropZone.icon:SetSize(22, 22)
+    f.dropZone.icon:SetPoint("LEFT", 10, 0)
+    f.dropZone.icon:SetTexture("Interface\\CURSOR\\openhandglow")
+    f.dropZone.icon:SetDesaturated(true)
+    f.dropZone.icon:SetVertexColor(0.7, 0.7, 0.7)
+
+    f.dropZone.label = f.dropZone:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.dropZone.label:SetPoint("LEFT", f.dropZone.icon, "RIGHT", 8, 0)
+    f.dropZone.label:SetText("|cff888888Drop Spell or Item here|r")
+
+    f.autoBuffCheck = CreateFrame("CheckButton", nil, f.generalPanel, "ChatConfigCheckButtonTemplate"); f.autoBuffCheck:SetPoint("TOPLEFT", f.dropZone, "BOTTOMLEFT", -4, -8)
     f.autoBuffLabel = f.generalPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.autoBuffLabel:SetPoint("LEFT", f.autoBuffCheck, "RIGHT", 2, 0)
     f.autoBuffLabel:SetText("|cffffcc00Auto Buff mode|r  (show icon only while buff is active)")
 
@@ -2711,6 +2748,126 @@ end
         MSWA.selectedSpellID = newKey; f.addEdit:SetText(""); MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList()
     end
     f.addButton:SetScript("OnClick", AddFromUI); f.addEdit:SetScript("OnEnterPressed", AddFromUI); f.addEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    -- Drag & drop from Spellbook / Inventory ----------------------------------
+    -- GetCursorInfo() returns in WoW 12.0 Midnight:
+    --   spell:  "spell", bookSlotIndex, bookType, spellID
+    --   item:   "item",  itemID,        itemLink
+    --   macro:  "macro", macroIndex
+    -- NOTE: For spells the FIRST number (id) is the book-slot index, NOT the
+    --        spell ID.  The actual spell ID lives in the 4th return (extra).
+    --        We resolve through C_Spell.GetSpellInfo which accepts both ID
+    --        and spell name, exactly like AceGUI / BetterCooldownManager do.
+
+    local function ResolveSpellIDFromCursor(id, info, extra)
+        -- Try extra first (spellID in 12.0)
+        if extra then
+            local data = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(extra)
+            if data and data.spellID then return data.spellID, data.name end
+        end
+        -- Try id (may be spellID in some API versions)
+        if id then
+            local data = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
+            if data and data.spellID then return data.spellID, data.name end
+        end
+        -- Try id as name string (spell dragged by name)
+        if id and type(id) == "string" then
+            local data = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
+            if data and data.spellID then return data.spellID, data.name end
+        end
+        return nil, nil
+    end
+
+    local function ResolveItemIDFromCursor(id, info)
+        -- id = itemID for item drags
+        local itemID = tonumber(id)
+        if itemID and itemID > 0 then return itemID end
+        -- Fallback: parse from itemLink in info
+        if type(info) == "string" then
+            local parsed = info:match("item:(%d+)")
+            if parsed then return tonumber(parsed) end
+        end
+        return nil
+    end
+
+    local function HandleCursorDrop()
+        if not GetCursorInfo then return false end
+        local cursorType, id, info, extra = GetCursorInfo()
+        if not cursorType then return false end
+
+        local numericID
+        if cursorType == "spell" then
+            local spellID, spellName = ResolveSpellIDFromCursor(id, info, extra)
+            if not spellID then ClearCursor(); return false end
+            numericID = spellID
+            f.idType = "SPELL"
+            if UIDropDownMenu_SetSelectedValue then UIDropDownMenu_SetSelectedValue(f.idTypeDrop, "SPELL") end
+            if UIDropDownMenu_SetText then UIDropDownMenu_SetText(f.idTypeDrop, "Spell") end
+
+        elseif cursorType == "item" then
+            local itemID = ResolveItemIDFromCursor(id, info)
+            if not itemID then ClearCursor(); return false end
+            numericID = itemID
+            f.idType = "ITEM"
+            if UIDropDownMenu_SetSelectedValue then UIDropDownMenu_SetSelectedValue(f.idTypeDrop, "ITEM") end
+            if UIDropDownMenu_SetText then UIDropDownMenu_SetText(f.idTypeDrop, "Item") end
+
+        elseif cursorType == "macro" then
+            -- Macro drag: try to resolve spell inside the macro (best effort)
+            ClearCursor(); return false
+        else
+            ClearCursor(); return false
+        end
+
+        f.addEdit:SetText(tostring(numericID))
+        ClearCursor()
+        AddFromUI()
+        return true
+    end
+
+    -- addEdit receives drag (like AceGUI EditBox)
+    f.addEdit:SetScript("OnReceiveDrag", function() HandleCursorDrop() end)
+    f.addEdit:HookScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" and GetCursorInfo and GetCursorInfo() then HandleCursorDrop() end
+    end)
+
+    -- dropZone receives drag
+    f.dropZone:SetScript("OnReceiveDrag", function() HandleCursorDrop() end)
+    f.dropZone:SetScript("OnClick", function(self, button)
+        if button == "LeftButton" and GetCursorInfo and GetCursorInfo() then HandleCursorDrop() end
+    end)
+    f.dropZone:RegisterForClicks("LeftButtonUp")
+
+    -- dropZone hover highlight
+    f.dropZone:SetScript("OnEnter", function(self)
+        local hasCursor = GetCursorInfo and GetCursorInfo()
+        if hasCursor then
+            self.bg:SetColorTexture(0.15, 0.25, 0.15, 0.8)
+            self.border:SetBackdropBorderColor(0.3, 0.9, 0.3, 1)
+            self.label:SetText("|cff44ff44Release to add aura|r")
+            self.icon:SetDesaturated(false)
+            self.icon:SetVertexColor(0.4, 1, 0.4)
+        else
+            self.bg:SetColorTexture(0.18, 0.18, 0.18, 0.8)
+            self.border:SetBackdropBorderColor(0.7, 0.7, 0.7, 1)
+            self.label:SetText("|cffbbbbbbDrop Spell or Item here|r")
+            self.icon:SetDesaturated(true)
+            self.icon:SetVertexColor(0.85, 0.85, 0.85)
+        end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Drag & Drop", 1, 0.82, 0)
+        GameTooltip:AddLine("Drag a spell from your Spellbook or", 1, 1, 1)
+        GameTooltip:AddLine("an item from your Bags to add it.", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    f.dropZone:SetScript("OnLeave", function(self)
+        self.bg:SetColorTexture(0.12, 0.12, 0.12, 0.7)
+        self.border:SetBackdropBorderColor(0.5, 0.5, 0.5, 0.8)
+        self.label:SetText("|cff888888Drop Spell or Item here|r")
+        self.icon:SetDesaturated(true)
+        self.icon:SetVertexColor(0.7, 0.7, 0.7)
+        GameTooltip:Hide()
+    end)
 
     -- Top button scripts
     f.btnNew:SetScript("OnClick", function() local db = MSWA_GetDB(); db.trackedSpells = db.trackedSpells or {}; local dk = MSWA_NewDraftKey(); db.trackedSpells[dk] = true; MSWA.selectedSpellID = dk; MSWA.selectedGroupID = nil; SetActiveTab("GENERAL"); MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList(); if f.addEdit then f.addEdit:SetFocus(); f.addEdit:HighlightText() end end)

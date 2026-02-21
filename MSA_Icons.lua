@@ -273,6 +273,8 @@ end
 
 local frame = CreateFrame("Frame", "MidnightSimpleAurasFrame", UIParent)
 MSWA.frame = frame
+frame:SetFrameStrata("HIGH")
+frame:SetToplevel(true)
 
 frame:SetSize(1, MSWA.ICON_SIZE)
 frame:SetPoint("CENTER", UIParent, "CENTER", 0, -150)
