@@ -19,6 +19,43 @@ function MSWA_ShowListContextMenu(row)
     -- Modern Midnight 12.0 menu API (MenuUtil.CreateContextMenu)
     if not MenuUtil or not MenuUtil.CreateContextMenu then return end
 
+    -- Count multi-selected auras
+    local multiSel = MSWA._multiSelect or {}
+    local multiCount = 0
+    for _ in pairs(multiSel) do multiCount = multiCount + 1 end
+
+    -- Multi-select batch menu: when right-clicking a multi-selected aura
+    if multiCount > 1 and row.entryType == "AURA" and row.key and multiSel[row.key] then
+        MenuUtil.CreateContextMenu(row, function(ownerRegion, rootDescription)
+            rootDescription:CreateTitle(multiCount .. " Auras Selected")
+            rootDescription:CreateButton("Export Selected (" .. multiCount .. ")", function()
+                -- Collect all export strings and combine
+                local parts = {}
+                for key in pairs(multiSel) do
+                    local s = MSWA_BuildAuraExportString(key)
+                    if s then tinsert(parts, s) end
+                end
+                if #parts > 0 then
+                    local combined = table.concat(parts, "\n---\n")
+                    local ef = MSWA_GetExportFrame()
+                    ef.title:SetText("Export " .. #parts .. " Auras")
+                    ef.editBox:SetText(combined); ef.editBox:HighlightText(); ef:Show()
+                end
+            end)
+            rootDescription:CreateDivider()
+            rootDescription:CreateButton("|cffff4040Delete Selected (" .. multiCount .. ")|r", function()
+                local keys = {}
+                for key in pairs(multiSel) do tinsert(keys, key) end
+                wipe(multiSel)
+                for _, key in ipairs(keys) do
+                    MSWA_DeleteAuraKey(key)
+                end
+                MSWA_RequestFullRefresh()
+            end)
+        end)
+        return
+    end
+
     MenuUtil.CreateContextMenu(row, function(ownerRegion, rootDescription)
         if row.entryType == "AURA" and row.key ~= nil then
             local key = row.key
@@ -858,6 +895,30 @@ local function MSWA_LayoutListRowText(row)
     row.text:SetPoint("RIGHT", row, "RIGHT", -6, 0)
 end
 
+    -- Multi-select state (Shift+Click range selection)
+    MSWA._multiSelect = {}   -- key → true
+    f._lastClickIdx = nil    -- entry index of last normal click
+    f._lastEntries = nil     -- cached entries from last UpdateAuraList
+
+    local function ClearMultiSelect()
+        wipe(MSWA._multiSelect)
+        f._lastClickIdx = nil
+    end
+
+    local function MultiSelectCount()
+        local n = 0
+        for _ in pairs(MSWA._multiSelect) do n = n + 1 end
+        return n
+    end
+
+    local function GetEntryIdx(entries, key)
+        if not entries or not key then return nil end
+        for i = 1, #entries do
+            if entries[i].entryType == "AURA" and entries[i].key == key then return i end
+        end
+        return nil
+    end
+
     for i = 1, MAX_VISIBLE_ROWS do
         local row = CreateFrame("Button", "MSWA_AuraRow" .. i, listPanel)
         row:SetSize(282, rowHeight); row:SetPoint("TOPLEFT", 8, -24 - (i - 1) * rowHeight)
@@ -878,6 +939,21 @@ end
         row.selectedTex = row:CreateTexture(nil, "BACKGROUND"); row.selectedTex:SetAllPoints(true)
         row.selectedTex:SetColorTexture(1, 1, 0, 0.15); row.selectedTex:Hide()
 
+        -- Multi-select highlight (cyan tint, distinct from single-select yellow)
+        row.multiSelTex = row:CreateTexture(nil, "BACKGROUND"); row.multiSelTex:SetAllPoints(true)
+        row.multiSelTex:SetColorTexture(0.2, 0.6, 1, 0.2); row.multiSelTex:Hide()
+
+        -- Drag insert indicator (bright line above or below row)
+        row.dragInsertTop = row:CreateTexture(nil, "OVERLAY")
+        row.dragInsertTop:SetHeight(2); row.dragInsertTop:SetColorTexture(0.2, 0.8, 1, 0.9)
+        row.dragInsertTop:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 1); row.dragInsertTop:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, 1)
+        row.dragInsertTop:Hide()
+
+        row.dragInsertBot = row:CreateTexture(nil, "OVERLAY")
+        row.dragInsertBot:SetHeight(2); row.dragInsertBot:SetColorTexture(0.2, 0.8, 1, 0.9)
+        row.dragInsertBot:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, -1); row.dragInsertBot:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, -1)
+        row.dragInsertBot:Hide()
+
         row.isMSWARow = true; row.entryType = nil; row.groupID = nil; row.key = nil; row.indent = 0; row.spellID = nil
 
         row:RegisterForClicks("AnyUp"); row:RegisterForDrag("LeftButton")
@@ -886,14 +962,50 @@ end
 
         row:SetScript("OnClick", function(self, button)
             if MSWA._isDraggingList then return end
-            if button == "RightButton" then MSWA_ShowListContextMenu(self); return end
+
+            -- Right-click: context menu (works with multi-select)
+            if button == "RightButton" then
+                -- If right-clicking an aura NOT in multi-select, or a non-aura row, clear multi-select
+                if MultiSelectCount() > 0 then
+                    local keepMulti = self.entryType == "AURA" and self.key and MSWA._multiSelect[self.key]
+                    if not keepMulti then
+                        ClearMultiSelect()
+                        MSWA_RefreshOptionsList()
+                    end
+                end
+                MSWA_ShowListContextMenu(self)
+                return
+            end
 
             local now = GetTime()
             local isDoubleClick = (lastClickRow == self) and (now - lastClickTime) < DOUBLECLICK_THRESHOLD
             lastClickRow = self
             lastClickTime = now
 
+            -- Shift+Click: range select auras
+            if IsShiftKeyDown() and self.entryType == "AURA" and self.key ~= nil and f._lastClickIdx and f._lastEntries then
+                local entries = f._lastEntries
+                local clickIdx = GetEntryIdx(entries, self.key)
+                if clickIdx then
+                    local fromIdx = math.min(f._lastClickIdx, clickIdx)
+                    local toIdx   = math.max(f._lastClickIdx, clickIdx)
+                    for ei = fromIdx, toIdx do
+                        local e = entries[ei]
+                        if e and e.entryType == "AURA" and e.key ~= nil then
+                            MSWA._multiSelect[e.key] = true
+                        end
+                    end
+                    -- Ensure the anchor aura is also in multi-select
+                    if MSWA.selectedSpellID then
+                        MSWA._multiSelect[MSWA.selectedSpellID] = true
+                    end
+                    MSWA_RefreshOptionsList()
+                    return
+                end
+            end
+
             if self.entryType == "AURA" and self.key ~= nil then
+                ClearMultiSelect()
                 if isDoubleClick then
                     -- Double-click: inline rename
                     local db = MSWA_GetDB()
@@ -902,9 +1014,14 @@ end
                     ShowInlineRename(self, currentName, self.key, nil)
                     return
                 end
+                -- Track entry index for shift-range
+                if f._lastEntries then
+                    f._lastClickIdx = GetEntryIdx(f._lastEntries, self.key)
+                end
                 MSWA.selectedSpellID = self.key; MSWA.selectedGroupID = nil; MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList(); return
             end
             if self.entryType == "GROUP" and self.groupID then
+                ClearMultiSelect()
                 if isDoubleClick then
                     -- Double-click: inline rename group
                     local db = MSWA_GetDB()
@@ -916,11 +1033,225 @@ end
                 MSWA.selectedGroupID = self.groupID; MSWA.selectedSpellID = nil; MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList(); return
             end
             if self.entryType == "UNGROUPED" then
+                ClearMultiSelect()
                 MSWA.selectedSpellID = nil; MSWA.selectedGroupID = nil; MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList()
             end
         end)
 
         f.rows[i] = row
+    end
+
+    -----------------------------------------------------------
+    -- Drag reorder system
+    -----------------------------------------------------------
+
+    -- Hide all drag insert indicators
+    local function HideDragIndicators()
+        for _, r in ipairs(f.rows) do
+            if r.dragInsertTop then r.dragInsertTop:Hide() end
+            if r.dragInsertBot then r.dragInsertBot:Hide() end
+        end
+        MSWA._dragDropTarget = nil
+        MSWA._dragDropAfter  = nil
+    end
+
+    -- Insert aura at a specific position relative to a target aura
+    function MSWA_InsertAuraAtPosition(dragKey, targetKey, insertAfter)
+        if dragKey == nil or targetKey == nil or dragKey == targetKey then return end
+        local db = MSWA_GetDB()
+        db.auraGroups = db.auraGroups or {}
+        db.groupMembers = db.groupMembers or {}
+        db.spellSettings = db.spellSettings or {}
+
+        local targetGid = db.auraGroups[targetKey]
+        local dragGid   = db.auraGroups[dragKey]
+
+        if targetGid and db.groups and db.groups[targetGid] then
+            -- Target is in a group: insert drag key into that group
+            -- Remove from previous group's member list
+            if dragGid and dragGid ~= targetGid and db.groupMembers[dragGid] then
+                for i = #db.groupMembers[dragGid], 1, -1 do
+                    if db.groupMembers[dragGid][i] == dragKey then
+                        table.remove(db.groupMembers[dragGid], i); break
+                    end
+                end
+            end
+
+            -- Assign to target group
+            db.auraGroups[dragKey] = targetGid
+            local s = db.spellSettings[dragKey] or {}
+            s.anchorFrame = nil
+            db.spellSettings[dragKey] = s
+
+            local members = MSWA_EnsureGroupMembers(targetGid) or {}
+            -- Remove dragKey if already present
+            for i = #members, 1, -1 do
+                if members[i] == dragKey then table.remove(members, i); break end
+            end
+            -- Find target index
+            local targetIdx = nil
+            for i = 1, #members do
+                if members[i] == targetKey then targetIdx = i; break end
+            end
+            if not targetIdx then targetIdx = #members end
+            local newIdx = insertAfter and (targetIdx + 1) or targetIdx
+            table.insert(members, newIdx, dragKey)
+
+            -- Recalculate x/y for all members in the group
+            local group = db.groups[targetGid]
+            local size = (group and group.size) or MSWA.ICON_SIZE
+            for i = 1, #members do
+                local ms = db.spellSettings[members[i]] or {}
+                ms.x = (i - 1) * (size + MSWA.ICON_SPACE)
+                ms.y = 0
+                ms.width  = ms.width  or size
+                ms.height = ms.height or size
+                db.spellSettings[members[i]] = ms
+            end
+            -- Also recalculate old group if changed groups
+            if dragGid and dragGid ~= targetGid and db.groupMembers[dragGid] then
+                local oldGroup = db.groups[dragGid]
+                local oldSize = (oldGroup and oldGroup.size) or MSWA.ICON_SIZE
+                local oldMembers = db.groupMembers[dragGid]
+                for i = 1, #oldMembers do
+                    local ms = db.spellSettings[oldMembers[i]] or {}
+                    ms.x = (i - 1) * (oldSize + MSWA.ICON_SPACE)
+                    ms.y = 0
+                    db.spellSettings[oldMembers[i]] = ms
+                end
+            end
+        else
+            -- Target is ungrouped: remove drag from its group, place ungrouped
+            if dragGid and db.groupMembers[dragGid] then
+                for i = #db.groupMembers[dragGid], 1, -1 do
+                    if db.groupMembers[dragGid][i] == dragKey then
+                        table.remove(db.groupMembers[dragGid], i); break
+                    end
+                end
+                -- Recalculate old group
+                local oldGroup = db.groups and db.groups[dragGid]
+                local oldSize = (oldGroup and oldGroup.size) or MSWA.ICON_SIZE
+                local oldMembers = db.groupMembers[dragGid]
+                for i = 1, #oldMembers do
+                    local ms = db.spellSettings[oldMembers[i]] or {}
+                    ms.x = (i - 1) * (oldSize + MSWA.ICON_SPACE)
+                    ms.y = 0
+                    db.spellSettings[oldMembers[i]] = ms
+                end
+            end
+            -- Preserve position offset when leaving group
+            local s = db.spellSettings[dragKey] or {}
+            if dragGid and db.groups and db.groups[dragGid] then
+                local g = db.groups[dragGid]
+                s.x = (s.x or 0) + (g.x or 0)
+                s.y = (s.y or 0) + (g.y or 0)
+                if g.anchorFrame and g.anchorFrame ~= "" then s.anchorFrame = g.anchorFrame end
+            end
+            db.spellSettings[dragKey] = s
+            db.auraGroups[dragKey] = nil
+        end
+    end
+
+    -- Hook drag overlay OnUpdate to show insert indicators on hovered rows
+    local function DragOverlay_OnUpdate_Hook()
+        if not MSWA._isDraggingList or not MSWA._dragKey then
+            HideDragIndicators(); return
+        end
+        HideDragIndicators()
+
+        local focus = MSWA_GetMouseFocusFrame and MSWA_GetMouseFocusFrame() or nil
+        local row = focus and MSWA_FindMSWARowFromFocus(focus) or nil
+        if not row or not row:IsShown() then return end
+
+        -- Only show insert indicator on aura rows and group/ungrouped headers
+        if row.entryType == "GROUP" or row.entryType == "UNGROUPED" then
+            -- Existing group/ungroup drop (highlight the row)
+            row.dragInsertBot:Show()
+            MSWA._dragDropTarget = row
+            MSWA._dragDropAfter  = nil
+            return
+        end
+
+        if row.entryType ~= "AURA" or row.key == nil then return end
+        if row.key == MSWA._dragKey then return end  -- don't show on self
+
+        -- Determine top/bottom half of row
+        local _, rowY = row:GetCenter()
+        local _, cursorY = GetCursorPosition()
+        local scale = row:GetEffectiveScale() or 1
+        cursorY = cursorY / scale
+
+        local insertAfter = cursorY < rowY
+        if insertAfter then
+            row.dragInsertBot:Show()
+        else
+            row.dragInsertTop:Show()
+        end
+        MSWA._dragDropTarget = row
+        MSWA._dragDropAfter  = insertAfter
+    end
+
+    -- Hook the overlay once it's created
+    local origBeginDrag = MSWA_BeginListDrag
+    function MSWA_BeginListDrag(key)
+        origBeginDrag(key)
+        -- Attach our indicator update to the overlay
+        local overlay = MSWA.dragOverlay
+        if overlay and not overlay._mswaHooked then
+            local origOnUpdate = overlay:GetScript("OnUpdate")
+            overlay:SetScript("OnUpdate", function(self, ...)
+                if origOnUpdate then origOnUpdate(self, ...) end
+                DragOverlay_OnUpdate_Hook()
+            end)
+            overlay._mswaHooked = true
+        end
+    end
+
+    -- Override EndListDrag to handle aura-to-aura drops
+    function MSWA_EndListDrag()
+        local overlay = MSWA.dragOverlay
+        local key = MSWA._dragKey
+        local dropTarget = MSWA._dragDropTarget
+        local dropAfter  = MSWA._dragDropAfter
+
+        MSWA._dragKey = nil
+        MSWA._isDraggingList = false
+        MSWA._dragDropTarget = nil
+        MSWA._dragDropAfter  = nil
+
+        HideDragIndicators()
+
+        if overlay then
+            overlay:Hide()
+            if overlay._iconFrame then overlay._iconFrame:Hide() end
+        end
+        if not key then return end
+
+        pcall(function()
+            -- Use our stored drop target first (accurate indicator-based)
+            local row = dropTarget
+            if not row then
+                -- Fallback to mouse focus
+                local focus = MSWA_GetMouseFocusFrame and MSWA_GetMouseFocusFrame() or nil
+                row = focus and MSWA_FindMSWARowFromFocus(focus) or nil
+            end
+
+            if not row then return end
+
+            if row.entryType == "AURA" and row.key ~= nil and row.key ~= key then
+                -- Aura-to-aura: reorder/move
+                MSWA_InsertAuraAtPosition(key, row.key, dropAfter)
+            elseif row.entryType == "GROUP" and row.groupID then
+                -- Drop on group header: add to end (existing behavior)
+                MSWA_SetAuraGroup(key, row.groupID)
+            elseif row.entryType == "UNGROUPED" then
+                -- Drop on ungrouped: remove from group
+                MSWA_SetAuraGroup(key, nil)
+            end
+        end)
+
+        if f and f.UpdateAuraList then pcall(function() f:UpdateAuraList() end) end
+        if MSWA_RequestUpdateSpells then pcall(MSWA_RequestUpdateSpells) end
     end
 
     -- UpdateAuraList method
@@ -934,8 +1265,10 @@ end
         end
         local db = MSWA_GetDB()
         local entries = MSWA_BuildListEntries()
+        f._lastEntries = entries  -- cache for shift-range selection
         local selectedKey = MSWA.selectedSpellID
         local selectedGroup = MSWA.selectedGroupID
+        local multiSel = MSWA._multiSelect
         local total = #entries
         local visibleRows = self:GetVisibleRows()
         FauxScrollFrame_Update(scrollFrame, total, visibleRows, rowHeight)
@@ -947,7 +1280,7 @@ end
             local entry = entries[idx]
             if entry then
                 row.entryType = entry.entryType; row.groupID = entry.groupID; row.key = entry.key; row.indent = entry.indent or 0
-                row:Show(); row.selectedTex:Hide()
+                row:Show(); row.selectedTex:Hide(); row.multiSelTex:Hide(); row.dragInsertTop:Hide(); row.dragInsertBot:Hide()
                 if row.sepTop then row.sepTop:Hide() end; if row.sepBottom then row.sepBottom:Hide() end
                 row.icon:SetTexture(nil); row:SetAlpha(1)
                 if row.icon.SetDesaturated then row.icon:SetDesaturated(false) end
@@ -988,10 +1321,12 @@ end
                     end
                     row.icon:SetTexture(icon); row.text:SetText(displayName)
                     if selectedKey ~= nil and selectedKey == key then row.selectedTex:Show() end
+                    -- Multi-select highlight (cyan)
+                    if key and multiSel[key] then row.multiSelTex:Show() end
                 end
             else
                 row.entryType = nil; row.groupID = nil; row.key = nil; row.indent = 0; row.spellID = nil
-                row.icon:SetTexture(nil); row.text:SetText(""); row.selectedTex:Hide()
+                row.icon:SetTexture(nil); row.text:SetText(""); row.selectedTex:Hide(); row.multiSelTex:Hide(); row.dragInsertTop:Hide(); row.dragInsertBot:Hide()
                 if row.sepTop then row.sepTop:Hide() end; if row.sepBottom then row.sepBottom:Hide() end
                 row:Hide()
             end
@@ -1001,7 +1336,7 @@ end
             local row = self.rows[i]
             if row then
                 row.entryType = nil; row.groupID = nil; row.key = nil; row.indent = 0; row.spellID = nil
-                row.icon:SetTexture(nil); row.text:SetText(""); row.selectedTex:Hide()
+                row.icon:SetTexture(nil); row.text:SetText(""); row.selectedTex:Hide(); row.multiSelTex:Hide(); row.dragInsertTop:Hide(); row.dragInsertBot:Hide()
                 if row.sepTop then row.sepTop:Hide() end; if row.sepBottom then row.sepBottom:Hide() end
                 row:Hide()
             end
