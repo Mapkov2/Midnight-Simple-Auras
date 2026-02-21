@@ -274,7 +274,10 @@ function MSWA_DeleteAuraKey(key)
     if key == nil then return end
     local db = MSWA_GetDB()
 
-    if MSWA_IsItemKey(key) then
+    if MSWA_IsItemInstanceKey(key) then
+        -- Item instance keys (item:ID:N) are stored in trackedSpells
+        if db.trackedSpells then db.trackedSpells[key] = nil end
+    elseif MSWA_IsItemKey(key) then
         local itemID = MSWA_KeyToItemID(key)
         if itemID and db.trackedItems then db.trackedItems[itemID] = nil end
     else
@@ -284,6 +287,9 @@ function MSWA_DeleteAuraKey(key)
     if db.spellSettings then db.spellSettings[key] = nil end
     if db.auraGroups    then db.auraGroups[key]    = nil end
     if db.customNames   then db.customNames[key]   = nil end
+
+    -- Clear autobuff state
+    if MSWA._autoBuff then MSWA._autoBuff[key] = nil end
 
     if MSWA.selectedSpellID == key then
         MSWA.selectedSpellID = nil

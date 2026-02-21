@@ -22,17 +22,29 @@ local DRAFT_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 
 function MSWA_IsItemKey(key)
     if type(key) ~= "string" then return false end
-    -- Check for "item:" prefix + all digits after
+    -- Check for "item:" prefix; accepts "item:123" and "item:123:N"
     if strsub(key, 1, 5) ~= "item:" then return false end
     local rest = strsub(key, 6)
-    return rest ~= "" and strmatch(rest, "^%d+$") ~= nil
+    if rest == "" then return false end
+    return strmatch(rest, "^%d+$") ~= nil or strmatch(rest, "^%d+:%d+$") ~= nil
+end
+
+function MSWA_IsItemInstanceKey(key)
+    if type(key) ~= "string" then return false end
+    return strmatch(key, "^item:%d+:%d+$") ~= nil
 end
 
 function MSWA_KeyToItemID(key)
     if type(key) ~= "string" then return nil end
     if strsub(key, 1, 5) ~= "item:" then return nil end
-    local rest = strsub(key, 6)
-    return tonumber(rest)
+    local id = strmatch(key, "^item:(%d+)")
+    return tonumber(id)
+end
+
+function MSWA_NewItemInstanceKey(itemID)
+    local db = MSWA_GetDB()
+    db._instanceCounter = (db._instanceCounter or 0) + 1
+    return ("item:%d:%d"):format(itemID, db._instanceCounter)
 end
 
 function MSWA_IsDraftKey(key)
@@ -84,7 +96,15 @@ function MSWA_IsAutoBuff(key)
     local db = MSWA_GetDB()
     if not db or not db.spellSettings then return false end
     local s = db.spellSettings[key] or db.spellSettings[tostring(key)]
-    return s and s.auraMode == "AUTOBUFF"
+    return s and (s.auraMode == "AUTOBUFF" or s.auraMode == "BUFF_THEN_CD")
+end
+
+function MSWA_IsBuffThenCD(key)
+    if key == nil then return false end
+    local db = MSWA_GetDB()
+    if not db or not db.spellSettings then return false end
+    local s = db.spellSettings[key] or db.spellSettings[tostring(key)]
+    return s and s.auraMode == "BUFF_THEN_CD"
 end
 
 -----------------------------------------------------------
@@ -98,6 +118,13 @@ function MSWA_GetDisplayNameForKey(key)
     end
     if MSWA_IsDraftKey(key) then
         return "???"
+    elseif MSWA_IsItemInstanceKey(key) then
+        local itemID = MSWA_KeyToItemID(key)
+        if itemID and GetItemInfo then
+            local name = GetItemInfo(itemID)
+            if name then return name .. " (copy)" end
+        end
+        return ("Item %d (copy)"):format(itemID or 0)
     elseif MSWA_IsItemKey(key) then
         local itemID = MSWA_KeyToItemID(key)
         if itemID and GetItemInfo then
@@ -127,6 +154,7 @@ function MSWA_GetIconForKey(key)
     if MSWA_IsDraftKey(key) then
         return DRAFT_ICON
     elseif MSWA_IsItemKey(key) then
+        -- Handles both item:123 and item:123:N
         local itemID = MSWA_KeyToItemID(key)
         if itemID and GetItemIcon then
             local tex = GetItemIcon(itemID)
@@ -196,3 +224,6 @@ end
 _G.MSWA_GetSpellSettings = MSWA_GetSpellSettings
 _G.MSWA_GetOrCreateSpellSettings = MSWA_GetOrCreateSpellSettings
 _G.MSWA_ResolveSpellSettingsKey = MSWA_ResolveSpellSettingsKey
+_G.MSWA_IsItemInstanceKey = MSWA_IsItemInstanceKey
+_G.MSWA_NewItemInstanceKey = MSWA_NewItemInstanceKey
+_G.MSWA_IsBuffThenCD = MSWA_IsBuffThenCD

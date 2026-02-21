@@ -193,8 +193,21 @@ local function MSWA_BuildSortedTrackedIDs()
     end)
     for _, k in ipairs(instanceKeys) do tinsert(tempIDList, k) end
 
+    -- Item instance keys (item:ID:N in trackedSpells)
+    local itemInstanceKeys = {}
     for id, enabled in pairs(tracked) do
-        if enabled and type(id) ~= "number" and not MSWA_IsSpellInstanceKey(id) then
+        if enabled and MSWA_IsItemInstanceKey(id) then tinsert(itemInstanceKeys, id) end
+    end
+    tsort(itemInstanceKeys, function(a, b)
+        local ia = MSWA_KeyToItemID(a) or 0
+        local ib = MSWA_KeyToItemID(b) or 0
+        if ia ~= ib then return ia < ib end
+        return a < b
+    end)
+    for _, k in ipairs(itemInstanceKeys) do tinsert(tempIDList, k) end
+
+    for id, enabled in pairs(tracked) do
+        if enabled and type(id) ~= "number" and not MSWA_IsSpellInstanceKey(id) and not MSWA_IsItemInstanceKey(id) then
             tinsert(tempIDList, id)
         end
     end
@@ -425,6 +438,8 @@ MSWA_UpdateDetailPanel = function()
         local abTag = ""
         if s and s.auraMode == "AUTOBUFF" then
             abTag = MSWA_IsItemKey(key) and " |cff44ddff[Buff Timer]|r" or " |cff44ddff[Auto Buff]|r"
+        elseif s and s.auraMode == "BUFF_THEN_CD" then
+            abTag = " |cff44ffaa[Buff -> CD]|r"
         end
         if MSWA_IsDraftKey(key) then f.detailName:SetText("New Aura - ???")
         elseif MSWA_IsItemKey(key) then
@@ -474,6 +489,9 @@ MSWA_UpdateDetailPanel = function()
     if f.grayCooldownCheck then
         f.grayCooldownCheck:SetChecked((s and s.grayOnCooldown) and true or false)
     end
+    if f.grayZeroCountCheck then
+        f.grayZeroCountCheck:SetChecked((s and s.showOnZeroCount) and true or false)
+    end
     if f.swipeDarkenCheck then
         -- "Swipe darkens on loss" == reverse swipe direction.
         f.swipeDarkenCheck:SetChecked((s and s.swipeDarken) and true or false)
@@ -497,9 +515,8 @@ MSWA_UpdateDetailPanel = function()
     end
 
     -- Sync conditional 2nd text color controls
-    -- Timer-based text color only works for AUTOBUFF (we compute remaining ourselves);
-    -- for spell/item CDs the values are tainted and can't be compared reliably
-    local isAutoBuff = s and s.auraMode == "AUTOBUFF"
+    -- Timer-based text color works for AUTOBUFF / BUFF_THEN_CD (we compute remaining ourselves)
+    local isAutoBuff = s and (s.auraMode == "AUTOBUFF" or s.auraMode == "BUFF_THEN_CD")
     if f.tc2Check then
         local canUseTC2 = isAutoBuff
         f.tc2Check:SetShown(canUseTC2)
@@ -575,6 +592,8 @@ MSWA_UpdateDetailPanel = function()
     -- Sync Auto Buff controls
     if f.autoBuffCheck then
         local isAutoBuff = (s and s.auraMode == "AUTOBUFF") and true or false
+        local isBuffThenCD = (s and s.auraMode == "BUFF_THEN_CD") and true or false
+        local hasBuffMode = isAutoBuff or isBuffThenCD
         local isSpellKey = MSWA_IsSpellKey(key)
         local isItemKey  = MSWA_IsItemKey(key)
         local isDraft    = MSWA_IsDraftKey(key)
@@ -591,31 +610,42 @@ MSWA_UpdateDetailPanel = function()
         else
             f.autoBuffCheck:Hide(); f.autoBuffLabel:Hide()
         end
-        -- Show duration / delay / haste for ANY key with AUTOBUFF
-        if f.buffDurLabel then f.buffDurLabel:SetShown(isAutoBuff) end
+
+        -- Buff → Cooldown checkbox
+        if f.buffThenCDCheck then
+            if isSpellKey or isItemKey then
+                f.buffThenCDCheck:Show(); f.buffThenCDLabel:Show()
+                f.buffThenCDCheck:SetChecked(isBuffThenCD)
+            else
+                f.buffThenCDCheck:Hide(); f.buffThenCDLabel:Hide()
+            end
+        end
+
+        -- Show duration / delay / haste for ANY key with buff mode
+        if f.buffDurLabel then f.buffDurLabel:SetShown(hasBuffMode) end
         if f.buffDurEdit then
-            f.buffDurEdit:SetShown(isAutoBuff)
-            if isAutoBuff then
+            f.buffDurEdit:SetShown(hasBuffMode)
+            if hasBuffMode then
                 local dur = (s and s.autoBuffDuration) or 10
                 dur = math.floor(tonumber(dur) * 1000 + 0.5) / 1000
                 f.buffDurEdit:SetText(tostring(dur))
             end
         end
         -- Buff delay
-        if f.buffDelayLabel then f.buffDelayLabel:SetShown(isAutoBuff) end
+        if f.buffDelayLabel then f.buffDelayLabel:SetShown(hasBuffMode) end
         if f.buffDelayEdit then
-            f.buffDelayEdit:SetShown(isAutoBuff)
-            if isAutoBuff then
+            f.buffDelayEdit:SetShown(hasBuffMode)
+            if hasBuffMode then
                 local d = (s and s.autoBuffDelay) or 0
                 d = math.floor(tonumber(d) * 1000 + 0.5) / 1000
                 f.buffDelayEdit:SetText(tostring(d))
             end
         end
-        -- Haste scaling toggle (only visible for AUTOBUFF)
+        -- Haste scaling toggle (only visible for buff modes)
         if f.hasteScaleCheck then
-            f.hasteScaleCheck:SetShown(isAutoBuff)
-            f.hasteScaleLabel:SetShown(isAutoBuff)
-            if isAutoBuff then
+            f.hasteScaleCheck:SetShown(hasBuffMode)
+            f.hasteScaleLabel:SetShown(hasBuffMode)
+            if hasBuffMode then
                 f.hasteScaleCheck:SetChecked((s and s.hasteScaling) and true or false)
             end
         end
@@ -1955,11 +1985,10 @@ end
         local s2 = MSWA_GetAuraSettings and MSWA_GetAuraSettings(key) or nil
         local gs = s2 and s2.glow or {}
         local curCond = gs.condition or "ALWAYS"
-        local isAutoBuff = s2 and s2.auraMode == "AUTOBUFF"
+        local isAutoBuff = s2 and (s2.auraMode == "AUTOBUFF" or s2.auraMode == "BUFF_THEN_CD")
 
         for _, condKey in ipairs(MSWA.GLOW_COND_ORDER or {}) do
-            -- Timer conditions only available for AUTOBUFF (we compute remaining ourselves);
-            -- for spell/item CDs the Blizzard API values are tainted and can't be compared
+            -- Timer conditions available for AUTOBUFF / BUFF_THEN_CD (we compute remaining ourselves)
             if isAutoBuff or (condKey ~= "TIMER_BELOW" and condKey ~= "TIMER_ABOVE") then
                 local info = UIDropDownMenu_CreateInfo()
                 info.text = MSWA.GLOW_CONDITIONS[condKey] or condKey
@@ -2108,15 +2137,15 @@ end
         UIDropDownMenu_SetText(f.glowTypeDrop, (MSWA.GLOW_TYPES or {})[glowType] or "Pixel Glow")
 
         -- Condition dropdown text
-        local isAutoBuff2 = s2 and s2.auraMode == "AUTOBUFF"
-        -- Timer conditions only work for AUTOBUFF; reset for spell/item CDs
+        local isAutoBuff2 = s2 and (s2.auraMode == "AUTOBUFF" or s2.auraMode == "BUFF_THEN_CD")
+        -- Timer conditions work for AUTOBUFF / BUFF_THEN_CD; reset for spell/item CDs
         if not isAutoBuff2 and (cond == "TIMER_BELOW" or cond == "TIMER_ABOVE") then
             cond = "ALWAYS"
             if gs then gs.condition = "ALWAYS" end
         end
         UIDropDownMenu_SetText(f.glowCondDrop, (MSWA.GLOW_CONDITIONS or {})[cond] or "Always")
 
-        -- Condition value visibility (only for AUTOBUFF timer conditions)
+        -- Condition value visibility (for AUTOBUFF / BUFF_THEN_CD timer conditions)
         local showValue = isAutoBuff2 and (cond == "TIMER_BELOW" or cond == "TIMER_ABOVE")
         f.glowCondValueLabel:SetShown(showValue)
         f.glowCondValueEdit:SetShown(showValue)
@@ -2247,7 +2276,14 @@ end
     f.autoBuffLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.autoBuffLabel:SetPoint("LEFT", f.autoBuffCheck, "RIGHT", 2, 0)
     f.autoBuffLabel:SetText("|cffffcc00Auto Buff mode|r  (show icon only while buff is active)")
 
-    f.buffDurLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.buffDurLabel:SetPoint("TOPLEFT", f.autoBuffCheck, "BOTTOMLEFT", 22, -6); f.buffDurLabel:SetText("Buff duration (sec):")
+    -- Buff → Cooldown checkbox
+    f.buffThenCDCheck = CreateFrame("CheckButton", nil, gp, "ChatConfigCheckButtonTemplate")
+    f.buffThenCDCheck:SetPoint("TOPLEFT", f.autoBuffCheck, "BOTTOMLEFT", 0, -2)
+    f.buffThenCDLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.buffThenCDLabel:SetPoint("LEFT", f.buffThenCDCheck, "RIGHT", 2, 0)
+    f.buffThenCDLabel:SetText("|cff44ffaaBuff -> Cooldown|r  (buff timer first, then cooldown)")
+
+    f.buffDurLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.buffDurLabel:SetPoint("TOPLEFT", f.buffThenCDCheck, "BOTTOMLEFT", 22, -6); f.buffDurLabel:SetText("Buff duration (sec):")
     f.buffDurEdit = CreateFrame("EditBox", nil, gp, "InputBoxTemplate"); f.buffDurEdit:SetSize(60, 20); f.buffDurEdit:SetPoint("LEFT", f.buffDurLabel, "RIGHT", 6, 0); f.buffDurEdit:SetAutoFocus(false)
 
     f.buffDelayLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.buffDelayLabel:SetPoint("TOPLEFT", f.buffDurLabel, "BOTTOMLEFT", 0, -8); f.buffDelayLabel:SetText("Timer restart after (sec):")
@@ -2256,8 +2292,24 @@ end
     f.autoBuffCheck:SetScript("OnClick", function(self)
         local key = MSWA.selectedSpellID; if not key then return end
         local db2 = MSWA_GetDB(); local s2 = select(1, MSWA_GetOrCreateSpellSettings(db2, key))
-        if self:GetChecked() then s2.auraMode = "AUTOBUFF"; if not s2.autoBuffDuration then s2.autoBuffDuration = 10 end
-        else s2.auraMode = nil; MSWA._autoBuff[key] = nil end
+        if self:GetChecked() then
+            s2.auraMode = "AUTOBUFF"; if not s2.autoBuffDuration then s2.autoBuffDuration = 10 end
+            if f.buffThenCDCheck then f.buffThenCDCheck:SetChecked(false) end
+        else
+            s2.auraMode = nil; MSWA._autoBuff[key] = nil
+        end
+        MSWA_UpdateDetailPanel(); MSWA_RequestUpdateSpells()
+    end)
+
+    f.buffThenCDCheck:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local db2 = MSWA_GetDB(); local s2 = select(1, MSWA_GetOrCreateSpellSettings(db2, key))
+        if self:GetChecked() then
+            s2.auraMode = "BUFF_THEN_CD"; if not s2.autoBuffDuration then s2.autoBuffDuration = 10 end
+            if f.autoBuffCheck then f.autoBuffCheck:SetChecked(false) end
+        else
+            s2.auraMode = nil; MSWA._autoBuff[key] = nil
+        end
         MSWA_UpdateDetailPanel(); MSWA_RequestUpdateSpells()
     end)
 
@@ -2303,7 +2355,7 @@ end
     f.detailDefault = CreateFrame("Button", nil, gp, "UIPanelButtonTemplate"); f.detailDefault:SetSize(80, 22); f.detailDefault:SetPoint("LEFT", f.detailApply, "RIGHT", 6, 0); f.detailDefault:SetText("Default")
 
     -- Set scroll child height for General panel
-    gp:SetHeight(440)
+    gp:SetHeight(470)
 
     -- Display tab
     f.displayPanel = CreateFrame("Frame", nil, rightPanel); f.displayPanel:SetPoint("TOPLEFT", 12, -60); f.displayPanel:SetPoint("BOTTOMRIGHT", -12, 12); f.displayPanel:Hide()
@@ -2408,9 +2460,22 @@ end
         MSWA_RequestUpdateSpells()
     end)
 
+    -- Grayscale on zero item count
+    f.grayZeroCountCheck = CreateFrame("CheckButton", nil, dp, "ChatConfigCheckButtonTemplate")
+    f.grayZeroCountCheck:SetPoint("TOPLEFT", f.grayCooldownCheck, "BOTTOMLEFT", 0, -4)
+    f.grayZeroCountLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.grayZeroCountLabel:SetPoint("LEFT", f.grayZeroCountCheck, "RIGHT", 2, 0)
+    f.grayZeroCountLabel:SetText("Show grayed when item count is 0")
+    f.grayZeroCountCheck:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.showOnZeroCount = self:GetChecked() and true or nil
+        MSWA_RequestUpdateSpells()
+    end)
+
     -- Swipe darkens on loss
     f.swipeDarkenCheck = CreateFrame("CheckButton", nil, dp, "ChatConfigCheckButtonTemplate")
-    f.swipeDarkenCheck:SetPoint("TOPLEFT", f.grayCooldownCheck, "BOTTOMLEFT", 0, -4)
+    f.swipeDarkenCheck:SetPoint("TOPLEFT", f.grayZeroCountCheck, "BOTTOMLEFT", 0, -4)
     f.swipeDarkenLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.swipeDarkenLabel:SetPoint("LEFT", f.swipeDarkenCheck, "RIGHT", 2, 0)
     f.swipeDarkenLabel:SetText("Swipe darkens on loss")
@@ -3000,7 +3065,7 @@ end
     f.idType = "AUTO"
     UIDropDownMenu_Initialize(f.idTypeDrop, function(self, level) if not level then return end
         local function Add(text, typeKey) local info = UIDropDownMenu_CreateInfo(); info.text = text; info.value = typeKey; info.func = function() f.idType = typeKey; UIDropDownMenu_SetSelectedValue(f.idTypeDrop, typeKey); UIDropDownMenu_SetText(f.idTypeDrop, text) end; info.checked = (f.idType == typeKey); UIDropDownMenu_AddButton(info, level) end
-        Add("Auto", "AUTO"); Add("Spell", "SPELL"); Add("Item", "ITEM"); Add("Auto Buff", "AUTOBUFF"); Add("Item Buff", "ITEMBUFF")
+        Add("Auto", "AUTO"); Add("Spell", "SPELL"); Add("Item", "ITEM"); Add("Auto Buff", "AUTOBUFF"); Add("Item Buff", "ITEMBUFF"); Add("Buff -> CD", "BUFF_THEN_CD"); Add("Item Buff -> CD", "ITEMBUFF_THEN_CD")
     end)
     UIDropDownMenu_SetSelectedValue(f.idTypeDrop, "AUTO"); UIDropDownMenu_SetText(f.idTypeDrop, "Auto")
 
@@ -3017,12 +3082,20 @@ end
     local function AddFromUI() local text = f.addEdit:GetText(); local id = tonumber(text); if not id then return end
         local db = MSWA_GetDB(); db.trackedItems = db.trackedItems or {}; db.trackedSpells = db.trackedSpells or {}
         local mode = f.idType or "AUTO"; local newKey
-        local function IsAlready(sid) if db.trackedSpells[sid] then return true end; for k, en in pairs(db.trackedSpells) do if en and MSWA_IsSpellInstanceKey(k) and MSWA_KeyToSpellID(k) == sid then return true end end; return false end
-        if mode == "ITEM" then db.trackedItems[id] = true; newKey = ("item:%d"):format(id)
-        elseif mode == "SPELL" then local name = MSWA_GetSpellName(id); if not name then return end; if IsAlready(id) then newKey = MSWA_NewSpellInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedSpells[id] = true; newKey = id end
-        elseif mode == "AUTOBUFF" then if IsAlready(id) then newKey = MSWA_NewSpellInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedSpells[id] = true; newKey = id end; db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[newKey] or {}; s.auraMode = "AUTOBUFF"; if not s.autoBuffDuration then s.autoBuffDuration = 10 end; db.spellSettings[newKey] = s
-        elseif mode == "ITEMBUFF" then db.trackedItems[id] = true; newKey = ("item:%d"):format(id); db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[newKey] or {}; s.auraMode = "AUTOBUFF"; if not s.autoBuffDuration then s.autoBuffDuration = 10 end; db.spellSettings[newKey] = s
-        else local name = MSWA_GetSpellName(id); if name then if IsAlready(id) then newKey = MSWA_NewSpellInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedSpells[id] = true; newKey = id end else db.trackedItems[id] = true; newKey = ("item:%d"):format(id) end end
+        local function IsAlreadySpell(sid) if db.trackedSpells[sid] then return true end; for k, en in pairs(db.trackedSpells) do if en and MSWA_IsSpellInstanceKey(k) and MSWA_KeyToSpellID(k) == sid then return true end end; return false end
+        local function IsAlreadyItem(iid) local bk = ("item:%d"):format(iid); if db.trackedItems[iid] then return true end; for k, en in pairs(db.trackedSpells) do if en and MSWA_IsItemKey(k) and MSWA_KeyToItemID(k) == iid then return true end end; return false end
+        if mode == "ITEM" then
+            if IsAlreadyItem(id) then newKey = MSWA_NewItemInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedItems[id] = true; newKey = ("item:%d"):format(id) end
+        elseif mode == "SPELL" then local name = MSWA_GetSpellName(id); if not name then return end; if IsAlreadySpell(id) then newKey = MSWA_NewSpellInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedSpells[id] = true; newKey = id end
+        elseif mode == "AUTOBUFF" then if IsAlreadySpell(id) then newKey = MSWA_NewSpellInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedSpells[id] = true; newKey = id end; db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[newKey] or {}; s.auraMode = "AUTOBUFF"; if not s.autoBuffDuration then s.autoBuffDuration = 10 end; db.spellSettings[newKey] = s
+        elseif mode == "ITEMBUFF" then
+            if IsAlreadyItem(id) then newKey = MSWA_NewItemInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedItems[id] = true; newKey = ("item:%d"):format(id) end
+            db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[newKey] or {}; s.auraMode = "AUTOBUFF"; if not s.autoBuffDuration then s.autoBuffDuration = 10 end; db.spellSettings[newKey] = s
+        elseif mode == "BUFF_THEN_CD" then if IsAlreadySpell(id) then newKey = MSWA_NewSpellInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedSpells[id] = true; newKey = id end; db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[newKey] or {}; s.auraMode = "BUFF_THEN_CD"; if not s.autoBuffDuration then s.autoBuffDuration = 10 end; db.spellSettings[newKey] = s
+        elseif mode == "ITEMBUFF_THEN_CD" then
+            if IsAlreadyItem(id) then newKey = MSWA_NewItemInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedItems[id] = true; newKey = ("item:%d"):format(id) end
+            db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[newKey] or {}; s.auraMode = "BUFF_THEN_CD"; if not s.autoBuffDuration then s.autoBuffDuration = 10 end; db.spellSettings[newKey] = s
+        else local name = MSWA_GetSpellName(id); if name then if IsAlreadySpell(id) then newKey = MSWA_NewSpellInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedSpells[id] = true; newKey = id end else if IsAlreadyItem(id) then newKey = MSWA_NewItemInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedItems[id] = true; newKey = ("item:%d"):format(id) end end end
         local oldKey = MSWA.selectedSpellID; if oldKey and MSWA_IsDraftKey(oldKey) and newKey then ReplaceDraftWithNewKey(oldKey, newKey) end
         MSWA.selectedSpellID = newKey; f.addEdit:SetText(""); MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList()
     end
@@ -3276,8 +3349,11 @@ SlashCmdList["MIDNIGHTSIMPLEWEAKAURAS"] = function(msg)
     end
     if cmd == "additem" or cmd == "itemadd" then
         local id = tonumber(rest); if not id then MSWA_Print("Use: /msa additem <ItemID>"); return end
-        db.trackedItems = db.trackedItems or {}; db.trackedItems[id] = true
-        MSWA.selectedSpellID = ("item:%d"):format(id); MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList()
+        db.trackedItems = db.trackedItems or {}; db.trackedSpells = db.trackedSpells or {}
+        local newKey
+        if db.trackedItems[id] then newKey = MSWA_NewItemInstanceKey(id); db.trackedSpells[newKey] = true
+        else db.trackedItems[id] = true; newKey = ("item:%d"):format(id) end
+        MSWA.selectedSpellID = newKey; MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList()
         MSWA_Print(("Now tracking item %d."):format(id)); return
     end
     if cmd == "remove" or cmd == "del" or cmd == "delete" then

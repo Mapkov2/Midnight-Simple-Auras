@@ -205,10 +205,16 @@ function MSWA_ImportAuraPayload(payload, forcedGroupID)
     if payload.type == "SPELL_INSTANCE" or MSWA_IsSpellInstanceKey(key) then
         local sid = payload.spellID or MSWA_KeyToSpellID(key)
         if sid then key = MSWA_NewSpellInstanceKey(sid) end
+    elseif payload.type == "ITEM_INSTANCE" or MSWA_IsItemInstanceKey(key) then
+        local iid = payload.itemID or MSWA_KeyToItemID(key)
+        if iid then key = MSWA_NewItemInstanceKey(iid) end
     end
 
     local enabled = (payload.enabled ~= false)
-    if payload.type == "ITEM" or MSWA_IsItemKey(key) then
+    if MSWA_IsItemInstanceKey(key) then
+        -- Item instances live in trackedSpells
+        db.trackedSpells[key] = enabled
+    elseif payload.type == "ITEM" or MSWA_IsItemKey(key) then
         local itemID = payload.itemID or MSWA_KeyToItemID(key)
         if itemID then db.trackedItems[itemID] = enabled end
     else
@@ -331,14 +337,17 @@ function MSWA_BuildAuraExportString(key)
     local payload = {
         exportVersion = 1,
         key = key,
-        type = (MSWA_IsItemKey(key) and "ITEM") or (MSWA_IsDraftKey(key) and "DRAFT") or (MSWA_IsSpellInstanceKey(key) and "SPELL_INSTANCE") or "SPELL",
+        type = (MSWA_IsItemInstanceKey(key) and "ITEM_INSTANCE") or (MSWA_IsItemKey(key) and "ITEM") or (MSWA_IsDraftKey(key) and "DRAFT") or (MSWA_IsSpellInstanceKey(key) and "SPELL_INSTANCE") or "SPELL",
         enabled = true,
         customName = (db.customNames and db.customNames[key]) or nil,
         groupID = (db.auraGroups and db.auraGroups[key]) or nil,
         spellSettings = rawSettings and MSWA_DeepCopyTable(rawSettings) or nil,
     }
     if MSWA_IsSpellInstanceKey(key) then payload.spellID = MSWA_KeyToSpellID(key) end
-    if MSWA_IsItemKey(key) then
+    if MSWA_IsItemInstanceKey(key) then
+        payload.itemID = MSWA_KeyToItemID(key)
+        if db.trackedSpells then payload.enabled = db.trackedSpells[key] and true or false end
+    elseif MSWA_IsItemKey(key) then
         local itemID = MSWA_KeyToItemID(key)
         payload.itemID = itemID
         if itemID and db.trackedItems then payload.enabled = db.trackedItems[itemID] and true or false end
