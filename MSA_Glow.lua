@@ -1,7 +1,8 @@
 -- ########################################################
 -- MSA_Glow.lua
--- LibCustomGlow integration â€“ conditional glow per aura
--- v3: hot-path accepts gs directly, zero DB lookups
+-- LibCustomGlow integration – conditional glow per aura
+-- v4: hot-path accepts gs directly, zero DB lookups
+--     pre-allocated color table – zero GC per ApplyGlow
 -- ########################################################
 
 local type, tonumber = type, tonumber
@@ -115,27 +116,28 @@ local function ShouldGlow(gs, remaining, isOnCooldown)
 end
 
 -----------------------------------------------------------
--- Apply glow (unchanged)
+-- Apply glow (v4: reuse pre-allocated color table)
 -----------------------------------------------------------
+
+-- v4: single reusable color table – zero allocation per glow
+local _glowColor = { 0.95, 0.95, 0.32, 1 }
 
 local function ApplyGlow(btn, gs)
     local glowType = gs.glowType or "PIXEL"
     local gc = gs.color or GLOW_DEFAULTS.color
-    local c = {
-        tonumber(gc.r) or 0.95,
-        tonumber(gc.g) or 0.95,
-        tonumber(gc.b) or 0.32,
-        tonumber(gc.a) or 1,
-    }
+    _glowColor[1] = tonumber(gc.r) or 0.95
+    _glowColor[2] = tonumber(gc.g) or 0.95
+    _glowColor[3] = tonumber(gc.b) or 0.32
+    _glowColor[4] = tonumber(gc.a) or 1
 
     if glowType == "PIXEL" then
-        LCG.PixelGlow_Start(btn, c, tonumber(gs.lines) or 8, tonumber(gs.frequency) or 0.25, nil, tonumber(gs.thickness) or 2, 0, 0, false, GLOW_KEY)
+        LCG.PixelGlow_Start(btn, _glowColor, tonumber(gs.lines) or 8, tonumber(gs.frequency) or 0.25, nil, tonumber(gs.thickness) or 2, 0, 0, false, GLOW_KEY)
     elseif glowType == "AUTOCAST" then
-        LCG.AutoCastGlow_Start(btn, c, tonumber(gs.lines) or 4, tonumber(gs.frequency) or 0.125, tonumber(gs.scale) or 1, 0, 0, GLOW_KEY)
+        LCG.AutoCastGlow_Start(btn, _glowColor, tonumber(gs.lines) or 4, tonumber(gs.frequency) or 0.125, tonumber(gs.scale) or 1, 0, 0, GLOW_KEY)
     elseif glowType == "BUTTON" then
-        LCG.ButtonGlow_Start(btn, c, tonumber(gs.frequency) or 0.125)
+        LCG.ButtonGlow_Start(btn, _glowColor, tonumber(gs.frequency) or 0.125)
     elseif glowType == "PROC" then
-        LCG.ProcGlow_Start(btn, { color = c, duration = tonumber(gs.duration) or 1, key = GLOW_KEY })
+        LCG.ProcGlow_Start(btn, { color = _glowColor, duration = tonumber(gs.duration) or 1, key = GLOW_KEY })
     end
 end
 

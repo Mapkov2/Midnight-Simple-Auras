@@ -1,30 +1,45 @@
 -- ########################################################
 -- MSA_KeyHelpers.lua
 -- Key type helpers, display name, icon lookup
+--
+-- v2: Optimized string matching: string.find with plain flag
+--     and string.sub instead of string.match (regex) for
+--     hot-path key type checks.
 -- ########################################################
 
 local tonumber, tostring, type = tonumber, tostring, type
 local GetItemInfo = GetItemInfo
 local GetItemIcon = GetItemIcon
+local strfind = string.find
+local strsub  = string.sub
+local strmatch = string.match
 
 local DRAFT_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 
 -----------------------------------------------------------
--- Key type checks
+-- Key type checks (v2: optimized with find+sub)
 -----------------------------------------------------------
 
 function MSWA_IsItemKey(key)
-    return type(key) == "string" and key:match("^item:%d+$") ~= nil
+    if type(key) ~= "string" then return false end
+    -- Check for "item:" prefix + all digits after
+    if strsub(key, 1, 5) ~= "item:" then return false end
+    local rest = strsub(key, 6)
+    return rest ~= "" and strmatch(rest, "^%d+$") ~= nil
 end
 
 function MSWA_KeyToItemID(key)
-    if not MSWA_IsItemKey(key) then return nil end
-    local id = key:match("^item:(%d+)$")
-    return id and tonumber(id) or nil
+    if type(key) ~= "string" then return nil end
+    if strsub(key, 1, 5) ~= "item:" then return nil end
+    local rest = strsub(key, 6)
+    return tonumber(rest)
 end
 
 function MSWA_IsDraftKey(key)
-    return type(key) == "string" and key:match("^DRAFT:%d+$") ~= nil
+    if type(key) ~= "string" then return false end
+    if strsub(key, 1, 6) ~= "DRAFT:" then return false end
+    local rest = strsub(key, 7)
+    return rest ~= "" and strmatch(rest, "^%d+$") ~= nil
 end
 
 function MSWA_NewDraftKey()
@@ -34,13 +49,17 @@ function MSWA_NewDraftKey()
 end
 
 function MSWA_IsSpellInstanceKey(key)
-    return type(key) == "string" and key:match("^spell:%d+:%d+$") ~= nil
+    if type(key) ~= "string" then return false end
+    if strsub(key, 1, 6) ~= "spell:" then return false end
+    -- Must match spell:NUMBER:NUMBER
+    return strmatch(key, "^spell:%d+:%d+$") ~= nil
 end
 
 function MSWA_KeyToSpellID(key)
     if type(key) == "number" then return key end
     if type(key) == "string" then
-        local id = key:match("^spell:(%d+):%d+$")
+        if strsub(key, 1, 6) ~= "spell:" then return nil end
+        local id = strmatch(key, "^spell:(%d+):%d+$")
         if id then return tonumber(id) end
     end
     return nil

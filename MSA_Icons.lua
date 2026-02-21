@@ -1,6 +1,17 @@
 -- ########################################################
 -- MSA_Icons.lua
 -- Main frame, icon creation, Masque, font/text, anchor, drag
+--
+-- v5: Removed duplicate definitions of MSWA_GetFontPathFromKey,
+--     MSWA_GetTextStyleForKey, MSWA_ApplyTextStyleToButton,
+--     MSWA_GetStackStyleForKey, MSWA_ApplyStackStyleToButton,
+--     MSWA_GetStackShowMode, MSWA_TEXT_POS_LABELS,
+--     MSWA_TEXT_POINT_OFFSETS, MSWA_GetTextPosLabel.
+--
+--     These are now defined ONLY in MSA_SpellAPI.lua (which loads
+--     before this file). The previous Icons.lua versions were
+--     overwriting the SpellAPI cached versions, causing the hot
+--     path to use uncached pcall-per-call font lookups.
 -- ########################################################
 
 local ADDON_NAME = MSWA.ADDON_NAME
@@ -35,8 +46,6 @@ function MSWA_GetAnchorFrame(settings)
         return UIParent
     end
 
-    -- IMPORTANT: do NOT require IsShown() here.
-    -- Hidden frames can still be valid anchors, and this must work with /fstack.
     local f = _G[anchorName]
     if f then
         return f
@@ -83,21 +92,10 @@ end
 
 -----------------------------------------------------------
 -- Font helpers (SharedMedia)
+-- v5: MSWA_GetFontPathFromKey is now ONLY defined in MSA_SpellAPI.lua
+--     with permanent caching. Removed duplicate here that was
+--     overwriting the cached version with uncached pcall-per-call.
 -----------------------------------------------------------
-
-function MSWA_GetFontPathFromKey(fontKey)
-    local defaultPath = GameFontNormal and GameFontNormal.GetFont and select(1, GameFontNormal:GetFont()) or nil
-    if fontKey and fontKey ~= "DEFAULT" then
-        if LibStub then
-            local ok, LSM = pcall(LibStub, "LibSharedMedia-3.0")
-            if ok and LSM and LSM.Fetch then
-                local ok2, path = pcall(LSM.Fetch, LSM, "font", fontKey)
-                if ok2 and path then return path end
-            end
-        end
-    end
-    return defaultPath
-end
 
 function MSWA_GetUIFontPath()
     local db = MSWA_GetDB()
@@ -139,133 +137,10 @@ function MSWA_ApplyUIFont()
 end
 
 -----------------------------------------------------------
--- Text position presets
+-- v5: Text/Stack position presets, style helpers, and
+--     GetStackShowMode are now ONLY in MSA_SpellAPI.lua.
+--     Removed duplicates that were overwriting optimized versions.
 -----------------------------------------------------------
-
-MSWA_TEXT_POS_LABELS = {
-    TOPLEFT = "Top Left",
-    TOPRIGHT = "Top Right",
-    BOTTOMLEFT = "Bottom Left",
-    BOTTOMRIGHT = "Bottom Right",
-    CENTER = "Center",
-}
-
-MSWA_TEXT_POINT_OFFSETS = {
-    TOPLEFT = { 1, -1 },
-    TOPRIGHT = { -1, -1 },
-    BOTTOMLEFT = { 1, 1 },
-    BOTTOMRIGHT = { -1, 1 },
-    CENTER = { 0, 0 },
-}
-
-function MSWA_GetTextPosLabel(point)
-    if not point then return MSWA_TEXT_POS_LABELS.BOTTOMRIGHT end
-    return MSWA_TEXT_POS_LABELS[point] or tostring(point)
-end
-
-function MSWA_GetTextStyleForKey(key)
-    local db = MSWA_GetDB()
-    local s = nil
-    if key ~= nil then s = select(1, MSWA_GetSpellSettings(db, key)) end
-
-    local size = (s and s.textFontSize) or db.textFontSize or 12
-    size = tonumber(size) or 12
-    if size < 6 then size = 6 end
-    if size > 48 then size = 48 end
-
-    local tc = (s and s.textColor) or db.textColor or { r = 1, g = 1, b = 1 }
-    local r  = tonumber(tc.r) or 1
-    local g  = tonumber(tc.g) or 1
-    local b  = tonumber(tc.b) or 1
-
-    local point = (s and s.textPoint) or db.textPoint or "BOTTOMRIGHT"
-    point = tostring(point or "BOTTOMRIGHT")
-    local off = MSWA_TEXT_POINT_OFFSETS[point] or MSWA_TEXT_POINT_OFFSETS.BOTTOMRIGHT
-
-    return size, r, g, b, point, off[1], off[2]
-end
-
-function MSWA_ApplyTextStyleToButton(btn, key)
-    if not btn or not btn.count then return end
-
-    local db = MSWA_GetDB()
-    local s = (key ~= nil) and select(1, MSWA_GetSpellSettings(db, key)) or nil
-    local fontKey = (s and s.textFontKey) or "DEFAULT"
-    local path = MSWA_GetFontPathFromKey(fontKey)
-    local size, r, g, b, point, ox, oy = MSWA_GetTextStyleForKey(key)
-
-    if path and btn.count.SetFont then
-        btn.count:SetFont(path, size, "OUTLINE")
-    end
-    if btn.count.SetTextColor then
-        btn.count:SetTextColor(r, g, b, 1)
-    end
-    if btn.count.ClearAllPoints and btn.count.SetPoint then
-        btn.count:ClearAllPoints()
-        btn.count:SetPoint(point or "BOTTOMRIGHT", btn, point or "BOTTOMRIGHT", ox or -1, oy or 1)
-    end
-end
-
------------------------------------------------------------
--- Stack text style helpers
------------------------------------------------------------
-
-function MSWA_GetStackStyleForKey(key)
-    local db = MSWA_GetDB()
-    local s = nil
-    if key ~= nil then s = select(1, MSWA_GetSpellSettings(db, key)) end
-
-    local size = (s and s.stackFontSize) or 12
-    size = tonumber(size) or 12
-    if size < 6 then size = 6 end
-    if size > 48 then size = 48 end
-
-    local tc = (s and s.stackColor) or { r = 1, g = 1, b = 1 }
-    local r  = tonumber(tc.r) or 1
-    local g  = tonumber(tc.g) or 1
-    local b  = tonumber(tc.b) or 1
-
-    local point = (s and s.stackPoint) or "BOTTOMRIGHT"
-    point = tostring(point or "BOTTOMRIGHT")
-
-    local ox = (s and s.stackOffsetX) or 0
-    local oy = (s and s.stackOffsetY) or 0
-    ox = tonumber(ox) or 0
-    oy = tonumber(oy) or 0
-
-    return size, r, g, b, point, ox, oy
-end
-
-function MSWA_ApplyStackStyleToButton(btn, key)
-    local target = btn and btn.stackText
-    if not target then return end
-
-    local db = MSWA_GetDB()
-    local s = (key ~= nil) and select(1, MSWA_GetSpellSettings(db, key)) or nil
-    local fontKey = (s and s.stackFontKey) or "DEFAULT"
-    local path = MSWA_GetFontPathFromKey(fontKey)
-    local size, r, g, b, point, ox, oy = MSWA_GetStackStyleForKey(key)
-
-    if path and target.SetFont then
-        target:SetFont(path, size, "OUTLINE")
-    end
-    if target.SetTextColor then
-        target:SetTextColor(r, g, b, 1)
-    end
-    if target.ClearAllPoints and target.SetPoint then
-        target:ClearAllPoints()
-        local baseOff = MSWA_TEXT_POINT_OFFSETS[point] or MSWA_TEXT_POINT_OFFSETS.BOTTOMRIGHT
-        target:SetPoint(point or "BOTTOMRIGHT", btn, point or "BOTTOMRIGHT", (baseOff[1] or -1) + ox, (baseOff[2] or 1) + oy)
-    end
-end
-
-function MSWA_GetStackShowMode(key)
-    if not key then return "auto" end
-    local db = MSWA_GetDB()
-    local s = select(1, MSWA_GetSpellSettings(db, key))
-    if s and s.stackShowMode then return s.stackShowMode end
-    return "auto"
-end
 
 -----------------------------------------------------------
 -- Main frame + drag logic

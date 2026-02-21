@@ -1,6 +1,10 @@
 -- ########################################################
 -- MSA_Core.lua
 -- Namespace, config constants, shared upvalues
+--
+-- v2: Tooltip OnUpdate handler optimized – checks flags
+--     first before any function calls (zero overhead when
+--     already processed).
 -- ########################################################
 
 local ADDON_NAME, MSWA = ...
@@ -71,6 +75,9 @@ end
 
 -----------------------------------------------------------
 -- Tooltip ID Info (Spell ID / Icon ID / Item ID)
+-- v2: Optimized – early return via boolean flags avoids
+--     all function calls once the tooltip is already
+--     annotated. OnUpdate still fires but does zero work.
 -----------------------------------------------------------
 
 do
@@ -141,8 +148,10 @@ do
     end
 
     local function OnTooltipUpdate(tooltip)
-        AddSpellInfo(tooltip)
-        AddItemInfo(tooltip)
+        -- v2: Fast exit when both already processed (zero overhead)
+        if tooltip._mswaHasSpell and tooltip._mswaHasItem then return end
+        if not tooltip._mswaHasSpell then AddSpellInfo(tooltip) end
+        if not tooltip._mswaHasItem  then AddItemInfo(tooltip) end
     end
 
     local hookFrame = CreateFrame("Frame")

@@ -1,11 +1,14 @@
 -- ########################################################
--- MSA_SpellAPI.lua  (v3 Ã¢â‚¬â€œ max performance rewrite)
+-- MSA_SpellAPI.lua  (v4 – max performance rewrite)
 --
 -- Rules:
---   Ã¢â‚¬Â¢ pcall ONLY for Midnight secret-value APIs
---   Ã¢â‚¬Â¢ Font paths cached Ã¢â‚¬â€œ zero pcall in hot path
---   Ã¢â‚¬Â¢ CD API detected once at load time
---   Ã¢â‚¬Â¢ All hot-path helpers accept (db, s) Ã¢â‚¬â€œ no redundant lookups
+--   • pcall ONLY for Midnight secret-value APIs
+--   • Font paths cached – zero pcall in hot path
+--   • CD API detected once at load time
+--   • All hot-path helpers accept (db, s) – no redundant lookups
+--   • v4: pcall closures eliminated – named funcs only
+--   • v4: MSWA_ApplyStackStyle_Fast takes db param
+--   • v4: SwipeDarken dirty-flagged
 -- ########################################################
 
 local type, tostring, tonumber, select = type, tostring, tonumber, select
@@ -186,42 +189,47 @@ function MSWA_GetSpellChargesText(spellID)
 end
 
 -----------------------------------------------------------
--- Glow remaining: ZERO pcall for spells
+-- Glow remaining: named pcall helpers (v4: no closures)
 -----------------------------------------------------------
 
 local hasGetRemaining = C_Spell and C_Spell.GetSpellCooldownRemaining
 
--- Spell cooldown values are tainted in Midnight â€” pcall required for comparisons.
+-- v4: Named function for pcall – eliminates closure allocation
+local function _spellCDRemaining(cdInfo)
+    local st  = cdInfo.startTime
+    local dur = cdInfo.duration
+    if st <= 0 or dur <= 1.5 then return 0 end
+    return (st + dur) - GetTime()
+end
+
+-- Spell cooldown values are tainted in Midnight – pcall required for comparisons.
 -- Returns (remaining, isOnCooldown).
--- If tainted, remaining=0 but isOnCooldown may still be true (from pcall success on SetCooldown).
 function MSWA_GetSpellGlowRemaining(spellID)
     if not spellID then return 0, false end
     if not (C_Spell and C_Spell.GetSpellCooldown) then return 0, false end
     local cdInfo = C_Spell.GetSpellCooldown(spellID)
     if not cdInfo then return 0, false end
-    local ok, remaining = pcall(function()
-        local st  = cdInfo.startTime
-        local dur = cdInfo.duration
-        if st <= 0 or dur <= 1.5 then return 0 end
-        return (st + dur) - GetTime()
-    end)
+    -- v4: pcall on named function, not anonymous closure
+    local ok, remaining = pcall(_spellCDRemaining, cdInfo)
     if ok and type(remaining) == "number" and remaining > 0 then
         return remaining, true
     elseif ok then
         return 0, false
     end
-    -- pcall failed (tainted) â€” remaining unknown, but caller should use
-    -- IsCooldownActive(btn) for the boolean instead
+    -- pcall failed (tainted) – remaining unknown
     return 0, false
 end
 
--- Item cooldowns â€” also pcall-wrapped for safety
+-- Item cooldowns – also pcall-wrapped for safety
+-- v4: Named function for pcall
+local function _itemGlowRemaining(start, duration)
+    if start <= 0 or duration <= 1.5 then return 0 end
+    return (start + duration) - GetTime()
+end
+
 function MSWA_GetItemGlowRemaining(start, duration)
     if not start or not duration then return 0, false end
-    local ok, remaining = pcall(function()
-        if start <= 0 or duration <= 1.5 then return 0 end
-        return (start + duration) - GetTime()
-    end)
+    local ok, remaining = pcall(_itemGlowRemaining, start, duration)
     if ok and type(remaining) == "number" and remaining > 0 then
         return remaining, true
     end
@@ -267,10 +275,8 @@ end
 function MSWA_ApplyTextStyle(btn, db, s)
     local count = btn.count
     if not count then return end
-    -- Font key resolution: per-aura override -> global -> DEFAULT
     local fontKey = (s and s.textFontKey) or (db and db.fontKey) or "DEFAULT"
     local path = MSWA_GetFontPathFromKey(fontKey)
-    -- Robust fallback: if for any reason Fetch/GetFontPath fails, reuse current font path
     if not path and count.GetFont then path = select(1, count:GetFont()) end
     local size = tonumber((s and s.textFontSize) or (db and db.textFontSize) or 12) or 12
     if size < 6 then size = 6 elseif size > 48 then size = 48 end
@@ -285,13 +291,10 @@ function MSWA_ApplyTextStyle(btn, db, s)
     count:SetPoint(point, btn, point, off[1], off[2])
 end
 
-
--- Inline stack style: no MSWA_GetDB, no MSWA_GetSpellSettings
-function MSWA_ApplyStackStyle(btn, s)
+-- v4: Stack style that takes db as parameter (no internal MSWA_GetDB call)
+function MSWA_ApplyStackStyle_Fast(btn, s, db)
     local target = btn.stackText
     if not target then return end
-    local db = MSWA_GetDB()
-    -- Font key resolution: per-aura override -> global stack -> global -> DEFAULT
     local fontKey = (s and s.stackFontKey) or (db and db.stackFontKey) or (db and db.fontKey) or "DEFAULT"
     local path = MSWA_GetFontPathFromKey(fontKey)
     if not path and target.GetFont then path = select(1, target:GetFont()) end
@@ -310,8 +313,14 @@ function MSWA_ApplyStackStyle(btn, s)
     target:SetPoint(point, btn, point, baseOff[1] + ox, baseOff[2] + oy)
 end
 
+-- Legacy: ApplyStackStyle (calls MSWA_GetDB internally – for Options UI)
+function MSWA_ApplyStackStyle(btn, s)
+    MSWA_ApplyStackStyle_Fast(btn, s, MSWA_GetDB())
+end
+
+
 -----------------------------------------------------------
--- Buff visual (stacks/charges) Ã¢â‚¬â€œ accepts db + s
+-- Buff visual (stacks/charges) – accepts db + s
 -----------------------------------------------------------
 
 function MSWA_UpdateBuffVisual_Fast(btn, s, spellID, isItem, itemID)
@@ -333,8 +342,6 @@ function MSWA_UpdateBuffVisual_Fast(btn, s, spellID, isItem, itemID)
     if spellID then
         local auraData = MSWA_GetPlayerAuraDataBySpellID(spellID)
 
-        -- Blizzard-style: show stacks only for 2+ in AUTO; for forced SHOW we
-        -- still show "1" if the aura exists (some builds clamp minCount to 2).
         local stackText = MSWA_GetAuraStackText(auraData, 2)
         if (not stackText) and showMode == "show" and auraData then
             stackText = "1"
@@ -355,7 +362,7 @@ function MSWA_UpdateBuffVisual_Fast(btn, s, spellID, isItem, itemID)
 end
 
 -----------------------------------------------------------
--- Conditional text color Ã¢â‚¬â€œ accepts s directly
+-- Conditional text color – accepts s directly
 -----------------------------------------------------------
 
 local function FindCooldownText(cd)
@@ -406,24 +413,19 @@ function MSWA_ApplyConditionalTextColor_Fast(btn, s, db, remaining, isOnCooldown
 end
 
 -----------------------------------------------------------
--- Swipe darken Ã¢â‚¬â€œ accepts s directly
+-- Swipe darken – v4: dirty-flagged to skip redundant calls
 -----------------------------------------------------------
 
 function MSWA_ApplySwipeDarken_Fast(btn, s)
     local cd = btn and btn.cooldown
     if not cd then return end
 
-    -- We always show a Blizzard-style radial swipe by default.
-    -- The Options toggle "Swipe darkens on loss" controls *direction* (reverse),
-    -- NOT whether the swipe exists.
-    --
-    -- Standard Blizzard cooldown swipe: remaining time is dark, elapsed is bright.
-    -- "Darkens on loss": elapsed becomes dark (reverse swipe), like a draining aura.
     local reverse = (s and s.swipeDarken) and true or false
+    local newState = reverse and 2 or 1
 
-    -- IMPORTANT (12.0/Midnight): Cooldown setters/clears may reset flags.
-    -- Re-apply every time to guarantee the swipe stays correct.
-    cd.__mswaSwipeState = reverse and 2 or 1
+    -- v4: skip if swipe state hasn't changed
+    if cd.__mswaSwipeState == newState then return end
+    cd.__mswaSwipeState = newState
 
     if cd.SetDrawEdge then cd:SetDrawEdge(false) end
     if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
@@ -431,7 +433,6 @@ function MSWA_ApplySwipeDarken_Fast(btn, s)
     if cd.SetReverse then
         cd:SetReverse(reverse)
     else
-        -- Fallback for older cooldown implementations
         cd.reverse = reverse
     end
 end
