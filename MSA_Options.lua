@@ -440,6 +440,10 @@ MSWA_UpdateDetailPanel = function()
             abTag = MSWA_IsItemKey(key) and " |cff44ddff[Buff Timer]|r" or " |cff44ddff[Auto Buff]|r"
         elseif s and s.auraMode == "BUFF_THEN_CD" then
             abTag = " |cff44ffaa[Buff -> CD]|r"
+        elseif s and s.auraMode == "REMINDER_BUFF" then
+            abTag = " |cffff6644[Reminder Buff]|r"
+        elseif s and s.auraMode == "CHARGES" then
+            abTag = " |cff44ddff[Charges]|r"
         end
         if MSWA_IsDraftKey(key) then f.detailName:SetText("New Aura - ???")
         elseif MSWA_IsItemKey(key) then
@@ -515,8 +519,8 @@ MSWA_UpdateDetailPanel = function()
     end
 
     -- Sync conditional 2nd text color controls
-    -- Timer-based text color works for AUTOBUFF / BUFF_THEN_CD (we compute remaining ourselves)
-    local isAutoBuff = s and (s.auraMode == "AUTOBUFF" or s.auraMode == "BUFF_THEN_CD")
+    -- Timer-based text color works for AUTOBUFF / BUFF_THEN_CD / REMINDER_BUFF (we compute remaining ourselves)
+    local isAutoBuff = s and (s.auraMode == "AUTOBUFF" or s.auraMode == "BUFF_THEN_CD" or s.auraMode == "REMINDER_BUFF" or s.auraMode == "CHARGES")
     if f.tc2Check then
         local canUseTC2 = isAutoBuff
         f.tc2Check:SetShown(canUseTC2)
@@ -589,11 +593,40 @@ MSWA_UpdateDetailPanel = function()
         f._initStackFontDrop()
     end
 
+    -- Sync Charge Tracker controls
+    if f.chargeMaxEdit then
+        f.chargeMaxEdit:SetText(tostring((s and s.chargeMax) or 3))
+    end
+    if f.chargeDurEdit then
+        f.chargeDurEdit:SetText(tostring((s and s.chargeDuration) or 0))
+    end
+    if f.chargeSizeEdit then
+        local csz = (s and s.chargeFontSize) or 12
+        csz = tonumber(csz) or 12; if csz < 6 then csz = 6 end; if csz > 48 then csz = 48 end
+        f.chargeSizeEdit:SetText(tostring(csz))
+    end
+    if f.chargePosDrop and UIDropDownMenu_SetText then
+        local cpt = (s and s.chargePoint) or "BOTTOMRIGHT"
+        UIDropDownMenu_SetText(f.chargePosDrop, MSWA_GetTextPosLabel(cpt))
+    end
+    if f.chargeColorSwatch then
+        local cc = (s and s.chargeColor) or { r = 1, g = 1, b = 1 }
+        f.chargeColorSwatch:SetColorTexture(tonumber(cc.r) or 1, tonumber(cc.g) or 1, tonumber(cc.b) or 1, 1)
+    end
+    if f.chargeOffXEdit then
+        f.chargeOffXEdit:SetText(tostring((s and s.chargeOffsetX) or 0))
+    end
+    if f.chargeOffYEdit then
+        f.chargeOffYEdit:SetText(tostring((s and s.chargeOffsetY) or 0))
+    end
+
     -- Sync Auto Buff controls
     if f.autoBuffCheck then
         local isAutoBuff = (s and s.auraMode == "AUTOBUFF") and true or false
         local isBuffThenCD = (s and s.auraMode == "BUFF_THEN_CD") and true or false
-        local hasBuffMode = isAutoBuff or isBuffThenCD
+        local isReminderBuff = (s and s.auraMode == "REMINDER_BUFF") and true or false
+        local isCharges = (s and s.auraMode == "CHARGES") and true or false
+        local hasBuffMode = isAutoBuff or isBuffThenCD or isReminderBuff
         local isSpellKey = MSWA_IsSpellKey(key)
         local isItemKey  = MSWA_IsItemKey(key)
         local isDraft    = MSWA_IsDraftKey(key)
@@ -621,12 +654,22 @@ MSWA_UpdateDetailPanel = function()
             end
         end
 
+        -- Reminder Buff checkbox
+        if f.reminderBuffCheck then
+            if isSpellKey or isItemKey then
+                f.reminderBuffCheck:Show(); f.reminderBuffLabel:Show()
+                f.reminderBuffCheck:SetChecked(isReminderBuff)
+            else
+                f.reminderBuffCheck:Hide(); f.reminderBuffLabel:Hide()
+            end
+        end
+
         -- Show duration / delay / haste for ANY key with buff mode
         if f.buffDurLabel then f.buffDurLabel:SetShown(hasBuffMode) end
         if f.buffDurEdit then
             f.buffDurEdit:SetShown(hasBuffMode)
             if hasBuffMode then
-                local dur = (s and s.autoBuffDuration) or 10
+                local dur = (s and s.autoBuffDuration) or (isReminderBuff and 3600 or 10)
                 dur = math.floor(tonumber(dur) * 1000 + 0.5) / 1000
                 f.buffDurEdit:SetText(tostring(dur))
             end
@@ -647,6 +690,92 @@ MSWA_UpdateDetailPanel = function()
             f.hasteScaleLabel:SetShown(hasBuffMode)
             if hasBuffMode then
                 f.hasteScaleCheck:SetChecked((s and s.hasteScaling) and true or false)
+            end
+        end
+
+        -- Reminder-specific settings (only visible when REMINDER_BUFF)
+        local showReminder = isReminderBuff
+        if f.reminderPersistDeathCheck then
+            f.reminderPersistDeathCheck:SetShown(showReminder)
+            f.reminderPersistDeathLabel:SetShown(showReminder)
+            if showReminder then
+                f.reminderPersistDeathCheck:SetChecked((s and s.reminderPersistDeath) and true or false)
+            end
+        end
+        if f.reminderShowTimerCheck then
+            f.reminderShowTimerCheck:SetShown(showReminder)
+            f.reminderShowTimerLabel:SetShown(showReminder)
+            if showReminder then
+                f.reminderShowTimerCheck:SetChecked((s and s.reminderShowTimer) and true or false)
+            end
+        end
+        if f.reminderTextLabel then f.reminderTextLabel:SetShown(showReminder) end
+        if f.reminderTextEdit then
+            f.reminderTextEdit:SetShown(showReminder)
+            if showReminder then
+                f.reminderTextEdit:SetText((s and s.reminderText) or "MISSING!")
+            end
+        end
+        if f.reminderFontSizeLabel then f.reminderFontSizeLabel:SetShown(showReminder) end
+        if f.reminderFontSizeEdit then
+            f.reminderFontSizeEdit:SetShown(showReminder)
+            if showReminder then
+                f.reminderFontSizeEdit:SetText(tostring((s and s.reminderFontSize) or 12))
+            end
+        end
+        if f.reminderColorLabel then f.reminderColorLabel:SetShown(showReminder) end
+        for ci = 1, 4 do
+            local cb = f["reminderColor" .. ci]
+            if cb then cb:SetShown(showReminder) end
+        end
+
+        -- Charges checkbox
+        local isCharges = (s and s.auraMode == "CHARGES") and true or false
+        if f.chargesCheck then
+            if isSpellKey or isItemKey then
+                f.chargesCheck:Show(); f.chargesLabel:Show()
+                f.chargesCheck:SetChecked(isCharges)
+            else
+                f.chargesCheck:Hide(); f.chargesLabel:Hide()
+            end
+        end
+
+        -- Dynamic re-anchoring: collapse gaps when sub-sections are hidden
+        -- Reminder checkbox: anchor to hasteScale (visible) or buffThenCD (hidden)
+        if f.reminderBuffCheck then
+            f.reminderBuffCheck:ClearAllPoints()
+            if hasBuffMode and f.hasteScaleCheck then
+                f.reminderBuffCheck:SetPoint("TOPLEFT", f.hasteScaleCheck, "BOTTOMLEFT", 0, -6)
+            elseif f.buffThenCDCheck and f.buffThenCDCheck:IsShown() then
+                f.reminderBuffCheck:SetPoint("TOPLEFT", f.buffThenCDCheck, "BOTTOMLEFT", 0, -6)
+            elseif f.autoBuffCheck and f.autoBuffCheck:IsShown() then
+                f.reminderBuffCheck:SetPoint("TOPLEFT", f.autoBuffCheck, "BOTTOMLEFT", 0, -6)
+            else
+                f.reminderBuffCheck:SetPoint("TOPLEFT", f.dropZone, "BOTTOMLEFT", -4, -8)
+            end
+        end
+        -- Charges checkbox: anchor to reminder sub-settings (visible) or reminderBuff (hidden)
+        if f.chargesCheck then
+            f.chargesCheck:ClearAllPoints()
+            if showReminder and f.reminderColorLabel then
+                f.chargesCheck:SetPoint("TOPLEFT", f.reminderColorLabel, "BOTTOMLEFT", -22, -10)
+            elseif f.reminderBuffCheck and f.reminderBuffCheck:IsShown() then
+                f.chargesCheck:SetPoint("TOPLEFT", f.reminderBuffCheck, "BOTTOMLEFT", 0, -6)
+            elseif f.buffThenCDCheck and f.buffThenCDCheck:IsShown() then
+                f.chargesCheck:SetPoint("TOPLEFT", f.buffThenCDCheck, "BOTTOMLEFT", 0, -6)
+            else
+                f.chargesCheck:SetPoint("TOPLEFT", f.dropZone, "BOTTOMLEFT", -4, -8)
+            end
+        end
+        -- Anchor label: anchor to chargesCheck (visible) or previous visible element
+        if f._anchorLabel then
+            f._anchorLabel:ClearAllPoints()
+            if f.chargesCheck and f.chargesCheck:IsShown() then
+                f._anchorLabel:SetPoint("TOPLEFT", f.chargesCheck, "BOTTOMLEFT", 0, -10)
+            elseif f.reminderBuffCheck and f.reminderBuffCheck:IsShown() then
+                f._anchorLabel:SetPoint("TOPLEFT", f.reminderBuffCheck, "BOTTOMLEFT", 0, -10)
+            else
+                f._anchorLabel:SetPoint("TOPLEFT", f.dropZone, "BOTTOMLEFT", -4, -8)
             end
         end
     end
@@ -1985,10 +2114,10 @@ end
         local s2 = MSWA_GetAuraSettings and MSWA_GetAuraSettings(key) or nil
         local gs = s2 and s2.glow or {}
         local curCond = gs.condition or "ALWAYS"
-        local isAutoBuff = s2 and (s2.auraMode == "AUTOBUFF" or s2.auraMode == "BUFF_THEN_CD")
+        local isAutoBuff = s2 and (s2.auraMode == "AUTOBUFF" or s2.auraMode == "BUFF_THEN_CD" or s2.auraMode == "REMINDER_BUFF" or s2.auraMode == "CHARGES")
 
         for _, condKey in ipairs(MSWA.GLOW_COND_ORDER or {}) do
-            -- Timer conditions available for AUTOBUFF / BUFF_THEN_CD (we compute remaining ourselves)
+            -- Timer conditions available for AUTOBUFF / BUFF_THEN_CD / REMINDER_BUFF (we compute remaining ourselves)
             if isAutoBuff or (condKey ~= "TIMER_BELOW" and condKey ~= "TIMER_ABOVE") then
                 local info = UIDropDownMenu_CreateInfo()
                 info.text = MSWA.GLOW_CONDITIONS[condKey] or condKey
@@ -2137,15 +2266,15 @@ end
         UIDropDownMenu_SetText(f.glowTypeDrop, (MSWA.GLOW_TYPES or {})[glowType] or "Pixel Glow")
 
         -- Condition dropdown text
-        local isAutoBuff2 = s2 and (s2.auraMode == "AUTOBUFF" or s2.auraMode == "BUFF_THEN_CD")
-        -- Timer conditions work for AUTOBUFF / BUFF_THEN_CD; reset for spell/item CDs
+        local isAutoBuff2 = s2 and (s2.auraMode == "AUTOBUFF" or s2.auraMode == "BUFF_THEN_CD" or s2.auraMode == "REMINDER_BUFF" or s2.auraMode == "CHARGES")
+        -- Timer conditions work for AUTOBUFF / BUFF_THEN_CD / REMINDER_BUFF; reset for spell/item CDs
         if not isAutoBuff2 and (cond == "TIMER_BELOW" or cond == "TIMER_ABOVE") then
             cond = "ALWAYS"
             if gs then gs.condition = "ALWAYS" end
         end
         UIDropDownMenu_SetText(f.glowCondDrop, (MSWA.GLOW_CONDITIONS or {})[cond] or "Always")
 
-        -- Condition value visibility (for AUTOBUFF / BUFF_THEN_CD timer conditions)
+        -- Condition value visibility (for AUTOBUFF / BUFF_THEN_CD / REMINDER_BUFF timer conditions)
         local showValue = isAutoBuff2 and (cond == "TIMER_BELOW" or cond == "TIMER_ABOVE")
         f.glowCondValueLabel:SetShown(showValue)
         f.glowCondValueEdit:SetShown(showValue)
@@ -2295,6 +2424,8 @@ end
         if self:GetChecked() then
             s2.auraMode = "AUTOBUFF"; if not s2.autoBuffDuration then s2.autoBuffDuration = 10 end
             if f.buffThenCDCheck then f.buffThenCDCheck:SetChecked(false) end
+            if f.reminderBuffCheck then f.reminderBuffCheck:SetChecked(false) end
+            if f.chargesCheck then f.chargesCheck:SetChecked(false) end
         else
             s2.auraMode = nil; MSWA._autoBuff[key] = nil
         end
@@ -2307,6 +2438,8 @@ end
         if self:GetChecked() then
             s2.auraMode = "BUFF_THEN_CD"; if not s2.autoBuffDuration then s2.autoBuffDuration = 10 end
             if f.autoBuffCheck then f.autoBuffCheck:SetChecked(false) end
+            if f.reminderBuffCheck then f.reminderBuffCheck:SetChecked(false) end
+            if f.chargesCheck then f.chargesCheck:SetChecked(false) end
         else
             s2.auraMode = nil; MSWA._autoBuff[key] = nil
         end
@@ -2346,8 +2479,141 @@ end
         MSWA._autoBuff[key] = nil; MSWA_RequestUpdateSpells()
     end)
 
+    -- Reminder Buff checkbox (third radio-style option)
+    f.reminderBuffCheck = CreateFrame("CheckButton", nil, gp, "ChatConfigCheckButtonTemplate")
+    f.reminderBuffCheck:SetPoint("TOPLEFT", f.hasteScaleCheck, "BOTTOMLEFT", 0, -6)
+    f.reminderBuffLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.reminderBuffLabel:SetPoint("LEFT", f.reminderBuffCheck, "RIGHT", 2, 0)
+    f.reminderBuffLabel:SetText("|cffff6644Reminder Buff|r  (alert when buff is missing)")
+
+    f.reminderBuffCheck:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local db2 = MSWA_GetDB(); local s2 = select(1, MSWA_GetOrCreateSpellSettings(db2, key))
+        if self:GetChecked() then
+            s2.auraMode = "REMINDER_BUFF"
+            if not s2.autoBuffDuration then s2.autoBuffDuration = 3600 end
+            if not s2.reminderText then s2.reminderText = "MISSING!" end
+            if not s2.reminderTextColor then s2.reminderTextColor = { r = 1, g = 0.2, b = 0.2 } end
+            if f.autoBuffCheck then f.autoBuffCheck:SetChecked(false) end
+            if f.buffThenCDCheck then f.buffThenCDCheck:SetChecked(false) end
+            if f.chargesCheck then f.chargesCheck:SetChecked(false) end
+        else
+            s2.auraMode = nil; MSWA._autoBuff[key] = nil
+        end
+        MSWA_UpdateDetailPanel(); MSWA_RequestUpdateSpells()
+    end)
+
+    -- Reminder Buff sub-settings (shown only when REMINDER_BUFF mode active)
+    f.reminderPersistDeathCheck = CreateFrame("CheckButton", nil, gp, "ChatConfigCheckButtonTemplate")
+    f.reminderPersistDeathCheck:SetPoint("TOPLEFT", f.reminderBuffCheck, "BOTTOMLEFT", 22, -2)
+    f.reminderPersistDeathLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.reminderPersistDeathLabel:SetPoint("LEFT", f.reminderPersistDeathCheck, "RIGHT", 2, 0)
+    f.reminderPersistDeathLabel:SetText("Persists through death  (poisons, flasks)")
+    f.reminderPersistDeathCheck:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.reminderPersistDeath = self:GetChecked() and true or nil
+    end)
+
+    f.reminderShowTimerCheck = CreateFrame("CheckButton", nil, gp, "ChatConfigCheckButtonTemplate")
+    f.reminderShowTimerCheck:SetPoint("TOPLEFT", f.reminderPersistDeathCheck, "BOTTOMLEFT", 0, -2)
+    f.reminderShowTimerLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.reminderShowTimerLabel:SetPoint("LEFT", f.reminderShowTimerCheck, "RIGHT", 2, 0)
+    f.reminderShowTimerLabel:SetText("Show timer while buff active")
+    f.reminderShowTimerCheck:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.reminderShowTimer = self:GetChecked() and true or nil
+        MSWA_RequestUpdateSpells()
+    end)
+
+    f.reminderTextLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.reminderTextLabel:SetPoint("TOPLEFT", f.reminderShowTimerCheck, "BOTTOMLEFT", 0, -8)
+    f.reminderTextLabel:SetText("Reminder text:")
+    f.reminderTextEdit = CreateFrame("EditBox", nil, gp, "InputBoxTemplate")
+    f.reminderTextEdit:SetSize(120, 20); f.reminderTextEdit:SetPoint("LEFT", f.reminderTextLabel, "RIGHT", 6, 0); f.reminderTextEdit:SetAutoFocus(false)
+    local function ApplyReminderText()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local t = f.reminderTextEdit:GetText()
+        s2.reminderText = (t and t ~= "") and t or nil
+        MSWA_InvalidateIconCache()
+    end
+    f.reminderTextEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyReminderText() end)
+    f.reminderTextEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    f.reminderTextEdit:SetScript("OnEditFocusLost", ApplyReminderText)
+
+    f.reminderFontSizeLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.reminderFontSizeLabel:SetPoint("TOPLEFT", f.reminderTextLabel, "BOTTOMLEFT", 0, -8)
+    f.reminderFontSizeLabel:SetText("Font size:")
+    f.reminderFontSizeEdit = CreateFrame("EditBox", nil, gp, "InputBoxTemplate")
+    f.reminderFontSizeEdit:SetSize(40, 20); f.reminderFontSizeEdit:SetPoint("LEFT", f.reminderFontSizeLabel, "RIGHT", 6, 0); f.reminderFontSizeEdit:SetAutoFocus(false); f.reminderFontSizeEdit:SetNumeric(true)
+    local function ApplyReminderFontSize()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local v = tonumber(f.reminderFontSizeEdit:GetText())
+        s2.reminderFontSize = (v and v >= 6 and v <= 72) and v or nil
+        MSWA_InvalidateIconCache()
+    end
+    f.reminderFontSizeEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyReminderFontSize() end)
+    f.reminderFontSizeEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    f.reminderFontSizeEdit:SetScript("OnEditFocusLost", ApplyReminderFontSize)
+
+    -- Color presets
+    f.reminderColorLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.reminderColorLabel:SetPoint("TOPLEFT", f.reminderFontSizeLabel, "BOTTOMLEFT", 0, -8)
+    f.reminderColorLabel:SetText("Text color:")
+
+    local colorPresets = { { "Red", 1, 0.2, 0.2 }, { "Yellow", 1, 1, 0.2 }, { "Green", 0.2, 1, 0.2 }, { "White", 1, 1, 1 } }
+    local prevColorBtn
+    for ci, cp in ipairs(colorPresets) do
+        local btn = CreateFrame("Button", nil, gp, "UIPanelButtonTemplate")
+        btn:SetSize(52, 18); btn:SetText(cp[1])
+        if ci == 1 then
+            btn:SetPoint("LEFT", f.reminderColorLabel, "RIGHT", 6, 0)
+        else
+            btn:SetPoint("LEFT", prevColorBtn, "RIGHT", 2, 0)
+        end
+        btn:SetScript("OnClick", function()
+            local key = MSWA.selectedSpellID; if not key then return end
+            local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+            s2.reminderTextColor = { r = cp[2], g = cp[3], b = cp[4] }
+            MSWA_InvalidateIconCache()
+        end)
+        prevColorBtn = btn
+        f["reminderColor" .. ci] = btn
+    end
+
+    -- Charges checkbox (fourth radio-style option)
+    f.chargesCheck = CreateFrame("CheckButton", nil, gp, "ChatConfigCheckButtonTemplate")
+    f.chargesCheck:SetPoint("TOPLEFT", f.reminderColorLabel, "BOTTOMLEFT", -22, -10)
+    f.chargesLabel = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.chargesLabel:SetPoint("LEFT", f.chargesCheck, "RIGHT", 2, 0)
+    f.chargesLabel:SetText("|cff44ddffCharges|r  (user-defined charges, countdown per charge, gray at 0)")
+
+    f.chargesCheck:SetScript("OnClick", function(self)
+        local key = MSWA.selectedSpellID; if not key then return end
+        local db2 = MSWA_GetDB(); local s2 = select(1, MSWA_GetOrCreateSpellSettings(db2, key))
+        if self:GetChecked() then
+            s2.auraMode = "CHARGES"
+            if not s2.chargeMax then s2.chargeMax = 3 end
+            if not s2.chargeDuration then s2.chargeDuration = 0 end
+            -- Init runtime state
+            MSWA._charges = MSWA._charges or {}
+            MSWA._charges[key] = { remaining = s2.chargeMax, rechargeStart = 0 }
+            if f.autoBuffCheck then f.autoBuffCheck:SetChecked(false) end
+            if f.buffThenCDCheck then f.buffThenCDCheck:SetChecked(false) end
+            if f.reminderBuffCheck then f.reminderBuffCheck:SetChecked(false) end
+        else
+            s2.auraMode = nil
+            if MSWA._charges then MSWA._charges[key] = nil end
+        end
+        MSWA_UpdateDetailPanel(); MSWA_RequestUpdateSpells()
+    end)
+
     -- Anchor
-    local labelA = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelA:SetPoint("TOPLEFT", f.hasteScaleCheck, "BOTTOMLEFT", 4, -10); labelA:SetText("Anchor to frame:")
+    local labelA = gp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); labelA:SetPoint("TOPLEFT", f.chargesCheck, "BOTTOMLEFT", 0, -10); labelA:SetText("Anchor to frame:")
+    f._anchorLabel = labelA
     f.detailA = CreateFrame("EditBox", nil, gp, "InputBoxTemplate"); f.detailA:SetSize(260, 20); f.detailA:SetPoint("LEFT", labelA, "RIGHT", 6, 0); f.detailA:SetAutoFocus(false)
     f.detailACD = CreateFrame("Button", nil, gp, "UIPanelButtonTemplate"); f.detailACD:SetSize(110, 22); f.detailACD:SetPoint("TOPLEFT", labelA, "BOTTOMLEFT", 0, -10); f.detailACD:SetText("CD Manager")
     f.detailAMSUF = CreateFrame("Button", nil, gp, "UIPanelButtonTemplate"); f.detailAMSUF:SetSize(110, 22); f.detailAMSUF:SetPoint("LEFT", f.detailACD, "RIGHT", 6, 0); f.detailAMSUF:SetText("MSUF Player")
@@ -2355,7 +2621,7 @@ end
     f.detailDefault = CreateFrame("Button", nil, gp, "UIPanelButtonTemplate"); f.detailDefault:SetSize(80, 22); f.detailDefault:SetPoint("LEFT", f.detailApply, "RIGHT", 6, 0); f.detailDefault:SetText("Default")
 
     -- Set scroll child height for General panel
-    gp:SetHeight(470)
+    gp:SetHeight(650)
 
     -- Display tab
     f.displayPanel = CreateFrame("Frame", nil, rightPanel); f.displayPanel:SetPoint("TOPLEFT", 12, -60); f.displayPanel:SetPoint("BOTTOMRIGHT", -12, 12); f.displayPanel:Hide()
@@ -2804,9 +3070,238 @@ end
         f.stackOffYEdit:SetScript("OnEditFocusLost", function() ApplyStackOffset() end)
     end
 
+    -- ======= Charge Tracker Section =======
+    -- User-defined charges: each cast consumes a charge,
+    -- recharge timer restores them. 0 charges = desaturated icon.
+    local chargeSep = dp:CreateTexture(nil, "ARTWORK")
+    chargeSep:SetPoint("TOPLEFT", f.stackColorLabel, "BOTTOMLEFT", 0, -10)
+    chargeSep:SetSize(400, 1); chargeSep:SetColorTexture(1, 1, 1, 0.12)
+
+    f.chargeHeaderLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.chargeHeaderLabel:SetPoint("TOPLEFT", chargeSep, "BOTTOMLEFT", 0, -8)
+    f.chargeHeaderLabel:SetText("|cff44ddffCharge Tracker|r  (requires aura mode 'Charges')")
+
+    -- Max Charges
+    f.chargeMaxLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.chargeMaxLabel:SetPoint("TOPLEFT", f.chargeHeaderLabel, "BOTTOMLEFT", 0, -10)
+    f.chargeMaxLabel:SetText("Max Charges:")
+    f.chargeMaxEdit = CreateFrame("EditBox", nil, dp, "InputBoxTemplate")
+    f.chargeMaxEdit:SetSize(50, 20); f.chargeMaxEdit:SetPoint("LEFT", f.chargeMaxLabel, "RIGHT", 6, 0); f.chargeMaxEdit:SetAutoFocus(false); f.chargeMaxEdit:SetNumeric(true)
+    f.chargeMaxMinus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.chargeMaxMinus:SetSize(20, 20); f.chargeMaxMinus:SetPoint("LEFT", f.chargeMaxEdit, "RIGHT", 2, 0); f.chargeMaxMinus:SetText("-")
+    f.chargeMaxPlus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.chargeMaxPlus:SetSize(20, 20); f.chargeMaxPlus:SetPoint("LEFT", f.chargeMaxMinus, "RIGHT", 2, 0); f.chargeMaxPlus:SetText("+")
+
+    -- Recharge Duration (seconds)
+    f.chargeDurLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.chargeDurLabel:SetPoint("LEFT", f.chargeMaxPlus, "RIGHT", 14, 0)
+    f.chargeDurLabel:SetText("Recharge (sec):")
+    f.chargeDurEdit = CreateFrame("EditBox", nil, dp, "InputBoxTemplate")
+    f.chargeDurEdit:SetSize(50, 20); f.chargeDurEdit:SetPoint("LEFT", f.chargeDurLabel, "RIGHT", 6, 0); f.chargeDurEdit:SetAutoFocus(false)
+
+    -- Reset Charges button
+    f.chargeResetBtn = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate")
+    f.chargeResetBtn:SetSize(100, 20); f.chargeResetBtn:SetPoint("TOPLEFT", f.chargeMaxLabel, "BOTTOMLEFT", 0, -10)
+    f.chargeResetBtn:SetText("Reset Charges")
+
+    -- Charge Font Size
+    f.chargeSizeLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.chargeSizeLabel:SetPoint("TOPLEFT", f.chargeResetBtn, "BOTTOMLEFT", 0, -10)
+    f.chargeSizeLabel:SetText("Size:")
+    f.chargeSizeEdit = CreateFrame("EditBox", nil, dp, "InputBoxTemplate")
+    f.chargeSizeEdit:SetSize(50, 20); f.chargeSizeEdit:SetPoint("LEFT", f.chargeSizeLabel, "RIGHT", 6, 0); f.chargeSizeEdit:SetAutoFocus(false); f.chargeSizeEdit:SetNumeric(true)
+    f.chargeSizeMinus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.chargeSizeMinus:SetSize(20, 20); f.chargeSizeMinus:SetPoint("LEFT", f.chargeSizeEdit, "RIGHT", 2, 0); f.chargeSizeMinus:SetText("-")
+    f.chargeSizePlus = CreateFrame("Button", nil, dp, "UIPanelButtonTemplate"); f.chargeSizePlus:SetSize(20, 20); f.chargeSizePlus:SetPoint("LEFT", f.chargeSizeMinus, "RIGHT", 2, 0); f.chargeSizePlus:SetText("+")
+
+    -- Charge Position
+    f.chargePosLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.chargePosLabel:SetPoint("LEFT", f.chargeSizePlus, "RIGHT", 14, 0)
+    f.chargePosLabel:SetText("Pos:")
+    f.chargePosDrop = CreateFrame("Frame", "MSWA_ChargePosDropDown", dp, "UIDropDownMenuTemplate")
+    f.chargePosDrop:SetPoint("LEFT", f.chargePosLabel, "RIGHT", -10, -3)
+
+    -- Charge Color
+    f.chargeColorLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.chargeColorLabel:SetPoint("TOPLEFT", f.chargeSizeLabel, "BOTTOMLEFT", 0, -12)
+    f.chargeColorLabel:SetText("Color:")
+    f.chargeColorBtn = CreateFrame("Button", nil, dp); f.chargeColorBtn:SetSize(18, 18); f.chargeColorBtn:SetPoint("LEFT", f.chargeColorLabel, "RIGHT", 8, 0); f.chargeColorBtn:EnableMouse(true)
+    f.chargeColorSwatch = f.chargeColorBtn:CreateTexture(nil, "ARTWORK"); f.chargeColorSwatch:SetAllPoints(true); f.chargeColorSwatch:SetColorTexture(1, 1, 1, 1)
+    local chargeBorder = f.chargeColorBtn:CreateTexture(nil, "BORDER"); chargeBorder:SetPoint("TOPLEFT", f.chargeColorBtn, "TOPLEFT", -1, 1); chargeBorder:SetPoint("BOTTOMRIGHT", f.chargeColorBtn, "BOTTOMRIGHT", 1, -1); chargeBorder:SetColorTexture(0, 0, 0, 1)
+
+    -- Charge Offset X/Y
+    f.chargeOffXLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.chargeOffXLabel:SetPoint("LEFT", f.chargeColorBtn, "RIGHT", 16, 0)
+    f.chargeOffXLabel:SetText("Offset X:")
+    f.chargeOffXEdit = CreateFrame("EditBox", nil, dp, "InputBoxTemplate")
+    f.chargeOffXEdit:SetSize(40, 20); f.chargeOffXEdit:SetPoint("LEFT", f.chargeOffXLabel, "RIGHT", 4, 0); f.chargeOffXEdit:SetAutoFocus(false)
+
+    f.chargeOffYLabel = dp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.chargeOffYLabel:SetPoint("LEFT", f.chargeOffXEdit, "RIGHT", 10, 0)
+    f.chargeOffYLabel:SetText("Y:")
+    f.chargeOffYEdit = CreateFrame("EditBox", nil, dp, "InputBoxTemplate")
+    f.chargeOffYEdit:SetSize(40, 20); f.chargeOffYEdit:SetPoint("LEFT", f.chargeOffYLabel, "RIGHT", 4, 0); f.chargeOffYEdit:SetAutoFocus(false)
+
+    -- ======= Charge control scripts =======
+    local function ClampChargeMax(v) v = tonumber(v) or 3; if v < 1 then v = 1 end; if v > 20 then v = 20 end; return v end
+    local function ApplyChargeMax()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local v = ClampChargeMax(f.chargeMaxEdit and f.chargeMaxEdit:GetText())
+        s2.chargeMax = v
+        if f.chargeMaxEdit then f.chargeMaxEdit:SetText(tostring(v)) end
+        -- Reset runtime charges to new max
+        if MSWA._charges and MSWA._charges[key] then
+            MSWA._charges[key].remaining = v
+            MSWA._charges[key].rechargeStart = 0
+        end
+        MSWA_ForceUpdateSpells()
+    end
+    f.chargeMaxEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyChargeMax() end)
+    f.chargeMaxEdit:SetScript("OnEditFocusLost", function() ApplyChargeMax() end)
+    f.chargeMaxMinus:SetScript("OnClick", function()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.chargeMax = ClampChargeMax((s2.chargeMax or 3) - 1)
+        if f.chargeMaxEdit then f.chargeMaxEdit:SetText(tostring(s2.chargeMax)) end
+        if MSWA._charges and MSWA._charges[key] then
+            MSWA._charges[key].remaining = s2.chargeMax
+            MSWA._charges[key].rechargeStart = 0
+        end
+        MSWA_ForceUpdateSpells()
+    end)
+    f.chargeMaxPlus:SetScript("OnClick", function()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.chargeMax = ClampChargeMax((s2.chargeMax or 3) + 1)
+        if f.chargeMaxEdit then f.chargeMaxEdit:SetText(tostring(s2.chargeMax)) end
+        if MSWA._charges and MSWA._charges[key] then
+            MSWA._charges[key].remaining = s2.chargeMax
+            MSWA._charges[key].rechargeStart = 0
+        end
+        MSWA_ForceUpdateSpells()
+    end)
+
+    -- Recharge duration apply
+    local function ApplyChargeDuration()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local v = tonumber(f.chargeDurEdit and f.chargeDurEdit:GetText()) or 0
+        if v < 0 then v = 0 end
+        s2.chargeDuration = v
+        if f.chargeDurEdit then f.chargeDurEdit:SetText(tostring(v)) end
+        MSWA_ForceUpdateSpells()
+    end
+    f.chargeDurEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyChargeDuration() end)
+    f.chargeDurEdit:SetScript("OnEditFocusLost", function() ApplyChargeDuration() end)
+
+    -- Reset charges button
+    f.chargeResetBtn:SetScript("OnClick", function()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetSpellSettings(MSWA_GetDB(), key))
+        local maxC = (s2 and tonumber(s2.chargeMax)) or 3
+        MSWA._charges = MSWA._charges or {}
+        MSWA._charges[key] = { remaining = maxC, rechargeStart = 0 }
+        MSWA_ForceUpdateSpells()
+    end)
+
+    local function ClampChargeSize(v) v = tonumber(v) or 12; if v < 6 then v = 6 end; if v > 48 then v = 48 end; return v end
+    local function ApplyChargeSize()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local v = ClampChargeSize(f.chargeSizeEdit and f.chargeSizeEdit:GetText())
+        s2.chargeFontSize = v
+        if f.chargeSizeEdit then f.chargeSizeEdit:SetText(tostring(v)) end
+        MSWA_InvalidateIconCache()
+    end
+    if f.chargeSizeEdit then
+        f.chargeSizeEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyChargeSize() end)
+        f.chargeSizeEdit:SetScript("OnEditFocusLost", function() ApplyChargeSize() end)
+    end
+    f.chargeSizeMinus:SetScript("OnClick", function()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local cur = ClampChargeSize(s2.chargeFontSize or 12)
+        s2.chargeFontSize = ClampChargeSize(cur - 1)
+        if f.chargeSizeEdit then f.chargeSizeEdit:SetText(tostring(s2.chargeFontSize)) end
+        MSWA_InvalidateIconCache()
+    end)
+    f.chargeSizePlus:SetScript("OnClick", function()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        local cur = ClampChargeSize(s2.chargeFontSize or 12)
+        s2.chargeFontSize = ClampChargeSize(cur + 1)
+        if f.chargeSizeEdit then f.chargeSizeEdit:SetText(tostring(s2.chargeFontSize)) end
+        MSWA_InvalidateIconCache()
+    end)
+
+    -- Charge position dropdown
+    if UIDropDownMenu_Initialize and UIDropDownMenu_SetWidth then
+        UIDropDownMenu_SetWidth(f.chargePosDrop, 100)
+        UIDropDownMenu_Initialize(f.chargePosDrop, function(self, level)
+            local posLabels = MSWA_TEXT_POS_LABELS or {}
+            local key = MSWA.selectedSpellID
+            local db3 = MSWA_GetDB()
+            local s3 = key and select(1, MSWA_GetSpellSettings(db3, key)) or nil
+            local curPos = (s3 and s3.chargePoint) or "BOTTOMRIGHT"
+            for pt, label in pairs(posLabels) do
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = label; info.value = pt; info.checked = (pt == curPos)
+                info.func = function()
+                    local k2 = MSWA.selectedSpellID; if not k2 then return end
+                    local ss = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), k2))
+                    ss.chargePoint = pt
+                    UIDropDownMenu_SetText(f.chargePosDrop, label); CloseDropDownMenus()
+                    MSWA_InvalidateIconCache()
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end)
+    end
+
+    -- Charge color picker
+    f.chargeColorBtn:SetScript("OnClick", function()
+        local keyAtOpen = MSWA.selectedSpellID
+        local db3 = MSWA_GetDB()
+        local ss = keyAtOpen and select(1, MSWA_GetSpellSettings(db3, keyAtOpen)) or nil
+        local tc = (ss and ss.chargeColor) or { r = 1, g = 1, b = 1 }
+        local r, g, b = tonumber(tc.r) or 1, tonumber(tc.g) or 1, tonumber(tc.b) or 1
+        local function ApplyCC(nr, ng, nb)
+            if keyAtOpen then
+                local s3 = select(1, MSWA_GetOrCreateSpellSettings(db3, keyAtOpen))
+                if s3 then s3.chargeColor = s3.chargeColor or {}; s3.chargeColor.r = nr; s3.chargeColor.g = ng; s3.chargeColor.b = nb end
+            end
+            if f.chargeColorSwatch and MSWA_KeyEquals(MSWA.selectedSpellID, keyAtOpen) then f.chargeColorSwatch:SetColorTexture(nr, ng, nb, 1) end
+            MSWA_InvalidateIconCache()
+        end
+        if ColorPickerFrame and ColorPickerFrame.SetupColorPickerAndShow then
+            local function OnChanged() local nr, ng, nb = ColorPickerFrame:GetColorRGB(); if type(nr) == "number" then ApplyCC(nr, ng, nb) end end
+            ColorPickerFrame:SetupColorPickerAndShow({ r=r, g=g, b=b, hasOpacity=false, swatchFunc=OnChanged, func=OnChanged, okayFunc=OnChanged, cancelFunc=function(restore) if type(restore) == "table" then ApplyCC(restore.r or r, restore.g or g, restore.b or b) else ApplyCC(r, g, b) end end })
+        elseif ColorPickerFrame then
+            ColorPickerFrame.hasOpacity = false; ColorPickerFrame.previousValues = { r=r, g=g, b=b }
+            ColorPickerFrame.func = function() ApplyCC(ColorPickerFrame:GetColorRGB()) end
+            ColorPickerFrame.cancelFunc = function(prev) if type(prev) == "table" then ApplyCC(prev.r or r, prev.g or g, prev.b or b) else ApplyCC(r, g, b) end end
+            ColorPickerFrame:SetColorRGB(r, g, b); ColorPickerFrame:Show()
+        end
+    end)
+
+    -- Charge offset apply
+    local function ApplyChargeOffset()
+        local key = MSWA.selectedSpellID; if not key then return end
+        local s2 = select(1, MSWA_GetOrCreateSpellSettings(MSWA_GetDB(), key))
+        s2.chargeOffsetX = tonumber(f.chargeOffXEdit and f.chargeOffXEdit:GetText()) or 0
+        s2.chargeOffsetY = tonumber(f.chargeOffYEdit and f.chargeOffYEdit:GetText()) or 0
+        MSWA_InvalidateIconCache()
+    end
+    if f.chargeOffXEdit then
+        f.chargeOffXEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyChargeOffset() end)
+        f.chargeOffXEdit:SetScript("OnEditFocusLost", function() ApplyChargeOffset() end)
+    end
+    if f.chargeOffYEdit then
+        f.chargeOffYEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); ApplyChargeOffset() end)
+        f.chargeOffYEdit:SetScript("OnEditFocusLost", function() ApplyChargeOffset() end)
+    end
+
     -- ======= Conditional 2nd Text Color =======
     local tc2Sep = dp:CreateTexture(nil, "ARTWORK")
-    tc2Sep:SetPoint("TOPLEFT", f.stackColorLabel, "BOTTOMLEFT", 0, -10)
+    tc2Sep:SetPoint("TOPLEFT", f.chargeColorLabel, "BOTTOMLEFT", 0, -10)
     tc2Sep:SetSize(400, 1); tc2Sep:SetColorTexture(1, 1, 1, 0.12)
 
     f.tc2Check = CreateFrame("CheckButton", nil, dp, "ChatConfigCheckButtonTemplate")
@@ -2840,7 +3335,7 @@ end
     f.tc2ValueLabel:SetText("sec")
 
     -- Set scroll child height (covers all content so scrollbar appears when needed)
-    dp:SetHeight(640)
+    dp:SetHeight(770)
 
     -- Helper: update condition button text
     local function UpdateTC2CondText(cond)
@@ -3065,7 +3560,7 @@ end
     f.idType = "AUTO"
     UIDropDownMenu_Initialize(f.idTypeDrop, function(self, level) if not level then return end
         local function Add(text, typeKey) local info = UIDropDownMenu_CreateInfo(); info.text = text; info.value = typeKey; info.func = function() f.idType = typeKey; UIDropDownMenu_SetSelectedValue(f.idTypeDrop, typeKey); UIDropDownMenu_SetText(f.idTypeDrop, text) end; info.checked = (f.idType == typeKey); UIDropDownMenu_AddButton(info, level) end
-        Add("Auto", "AUTO"); Add("Spell", "SPELL"); Add("Item", "ITEM"); Add("Auto Buff", "AUTOBUFF"); Add("Item Buff", "ITEMBUFF"); Add("Buff -> CD", "BUFF_THEN_CD"); Add("Item Buff -> CD", "ITEMBUFF_THEN_CD")
+        Add("Auto", "AUTO"); Add("Spell", "SPELL"); Add("Item", "ITEM"); Add("Auto Buff", "AUTOBUFF"); Add("Item Buff", "ITEMBUFF"); Add("Buff -> CD", "BUFF_THEN_CD"); Add("Item Buff -> CD", "ITEMBUFF_THEN_CD"); Add("Reminder Buff", "REMINDER_BUFF"); Add("Item Reminder", "ITEM_REMINDER"); Add("Spell Charges", "SPELL_CHARGES"); Add("Item Charges", "ITEM_CHARGES")
     end)
     UIDropDownMenu_SetSelectedValue(f.idTypeDrop, "AUTO"); UIDropDownMenu_SetText(f.idTypeDrop, "Auto")
 
@@ -3095,6 +3590,20 @@ end
         elseif mode == "ITEMBUFF_THEN_CD" then
             if IsAlreadyItem(id) then newKey = MSWA_NewItemInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedItems[id] = true; newKey = ("item:%d"):format(id) end
             db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[newKey] or {}; s.auraMode = "BUFF_THEN_CD"; if not s.autoBuffDuration then s.autoBuffDuration = 10 end; db.spellSettings[newKey] = s
+        elseif mode == "REMINDER_BUFF" then
+            if IsAlreadySpell(id) then newKey = MSWA_NewSpellInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedSpells[id] = true; newKey = id end
+            db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[newKey] or {}; s.auraMode = "REMINDER_BUFF"; if not s.autoBuffDuration then s.autoBuffDuration = 3600 end; s.reminderText = "MISSING!"; s.reminderTextColor = { r = 1, g = 0.2, b = 0.2 }; db.spellSettings[newKey] = s
+        elseif mode == "ITEM_REMINDER" then
+            if IsAlreadyItem(id) then newKey = MSWA_NewItemInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedItems[id] = true; newKey = ("item:%d"):format(id) end
+            db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[newKey] or {}; s.auraMode = "REMINDER_BUFF"; if not s.autoBuffDuration then s.autoBuffDuration = 3600 end; s.reminderText = "MISSING!"; s.reminderTextColor = { r = 1, g = 0.2, b = 0.2 }; db.spellSettings[newKey] = s
+        elseif mode == "SPELL_CHARGES" then
+            if IsAlreadySpell(id) then newKey = MSWA_NewSpellInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedSpells[id] = true; newKey = id end
+            db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[newKey] or {}; s.auraMode = "CHARGES"; if not s.chargeMax then s.chargeMax = 3 end; if not s.chargeDuration then s.chargeDuration = 0 end; db.spellSettings[newKey] = s
+            MSWA._charges = MSWA._charges or {}; MSWA._charges[newKey] = { remaining = s.chargeMax, rechargeStart = 0 }
+        elseif mode == "ITEM_CHARGES" then
+            if IsAlreadyItem(id) then newKey = MSWA_NewItemInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedItems[id] = true; newKey = ("item:%d"):format(id) end
+            db.spellSettings = db.spellSettings or {}; local s = db.spellSettings[newKey] or {}; s.auraMode = "CHARGES"; if not s.chargeMax then s.chargeMax = 3 end; if not s.chargeDuration then s.chargeDuration = 0 end; db.spellSettings[newKey] = s
+            MSWA._charges = MSWA._charges or {}; MSWA._charges[newKey] = { remaining = s.chargeMax, rechargeStart = 0 }
         else local name = MSWA_GetSpellName(id); if name then if IsAlreadySpell(id) then newKey = MSWA_NewSpellInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedSpells[id] = true; newKey = id end else if IsAlreadyItem(id) then newKey = MSWA_NewItemInstanceKey(id); db.trackedSpells[newKey] = true else db.trackedItems[id] = true; newKey = ("item:%d"):format(id) end end end
         local oldKey = MSWA.selectedSpellID; if oldKey and MSWA_IsDraftKey(oldKey) and newKey then ReplaceDraftWithNewKey(oldKey, newKey) end
         MSWA.selectedSpellID = newKey; f.addEdit:SetText(""); MSWA_RequestUpdateSpells(); MSWA_RefreshOptionsList()

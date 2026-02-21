@@ -518,3 +518,181 @@ function MSWA_UpdateItemCount(btn, itemID)
     if type(cnt) == "number" then target:SetText(tostring(cnt)); target:Show()
     else target:SetText(""); target:Hide() end
 end
+
+-----------------------------------------------------------
+-- Reminder Buff: lazy-created centered label (zero cost
+-- when not used – FontString only allocated on first show)
+-----------------------------------------------------------
+
+local function GetOrCreateReminderLabel(btn)
+    if btn._msaReminderLabel then return btn._msaReminderLabel end
+    local label = btn:CreateFontString(nil, "OVERLAY")
+    label:SetDrawLayer("OVERLAY", 7)
+    label:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    label:Hide()
+    btn._msaReminderLabel = label
+    return label
+end
+
+-- _msaReminderStyleKey: dirty-flag so we skip SetFont/SetTextColor
+-- when settings haven't changed (same pattern as _msaStyleKey).
+function MSWA_ShowReminderLabel(btn, s, db)
+    local text = s and s.reminderText
+    if not text or text == "" then
+        if btn._msaReminderLabel then btn._msaReminderLabel:Hide() end
+        return
+    end
+
+    local label = GetOrCreateReminderLabel(btn)
+
+    -- Build style key for dirty-flag
+    local fontSize = tonumber(s.reminderFontSize) or 12
+    local c = s.reminderTextColor
+    local cr, cg, cb = 1, 0, 0
+    if c then cr = c.r or 1; cg = c.g or 0; cb = c.b or 0 end
+    local fk = db and db.fontKey or "DEFAULT"
+    local styleKey = text .. ":" .. fk .. ":" .. fontSize .. ":" .. cr .. ":" .. cg .. ":" .. cb
+
+    if btn._msaReminderStyleKey ~= styleKey then
+        btn._msaReminderStyleKey = styleKey
+        local fontPath = MSWA_GetFontPathFromKey(fk)
+        label:SetFont(fontPath, fontSize, "OUTLINE")
+        label:SetTextColor(cr, cg, cb, 1)
+        label:SetText(text)
+    end
+
+    label:Show()
+end
+
+function MSWA_HideReminderLabel(btn)
+    if btn._msaReminderLabel then
+        btn._msaReminderLabel:Hide()
+    end
+    btn._msaReminderStyleKey = nil
+end
+
+-----------------------------------------------------------
+-- Charge Display: lazy-created label for spell charges
+-- (Fire Blast 2/3) and item charges (Healthstone count).
+-- Secret-safe: pcall on GetSpellCharges, GetItemCount is
+-- plain Lua – no taint risk.
+-----------------------------------------------------------
+
+local function GetOrCreateChargeLabel(btn)
+    if btn._msaChargeLabel then return btn._msaChargeLabel end
+    local label = btn:CreateFontString(nil, "OVERLAY")
+    label:SetDrawLayer("OVERLAY", 7)
+    label:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+    label:Hide()
+    btn._msaChargeLabel = label
+    return label
+end
+
+-----------------------------------------------------------
+-- Charge Tracker: user-defined charges (100% secret-safe)
+--
+-- Zero API reads. Charges are tracked via cast detection
+-- (UNIT_SPELLCAST_SUCCEEDED / BAG_UPDATE_COOLDOWN) and
+-- client-side timers with GetTime(). All values are plain
+-- Lua numbers set by the user or our code – no taint.
+--
+-- Runtime state: MSWA._charges[key] = {
+--   remaining     = N,   -- current charges left
+--   rechargeStart = 0,   -- GetTime() when recharge began
+-- }
+-----------------------------------------------------------
+
+-- Recharge tick: called from engine's main loop.
+-- Restores charges when recharge duration has elapsed.
+-- Returns true if still recharging (needs continued updates).
+function MSWA_ChargeRechargeTick(key, s, now)
+    if not s or s.auraMode ~= "CHARGES" then return false end
+    local ch = MSWA._charges and MSWA._charges[key]
+    if not ch then return false end
+
+    local maxC = tonumber(s.chargeMax) or 3
+    local dur  = tonumber(s.chargeDuration) or 0
+
+    if dur <= 0 or ch.remaining >= maxC then
+        ch.rechargeStart = 0
+        return false
+    end
+
+    if ch.rechargeStart > 0 then
+        while ch.remaining < maxC and (now - ch.rechargeStart) >= dur do
+            ch.remaining = ch.remaining + 1
+            ch.rechargeStart = ch.rechargeStart + dur
+        end
+        if ch.remaining >= maxC then
+            ch.rechargeStart = 0
+            return false
+        end
+        return true  -- still recharging
+    end
+    return false
+end
+
+-- Consume one charge. Called from cast/item detection.
+function MSWA_ConsumeCharge(key, s)
+    if not s or s.auraMode ~= "CHARGES" then return false end
+    MSWA._charges = MSWA._charges or {}
+    local maxC = tonumber(s.chargeMax) or 3
+    local ch = MSWA._charges[key]
+    if not ch then
+        ch = { remaining = maxC, rechargeStart = 0 }
+        MSWA._charges[key] = ch
+    end
+    if ch.remaining <= 0 then return false end
+
+    local wasFull = (ch.remaining >= maxC)
+    ch.remaining = ch.remaining - 1
+
+    -- Start recharge timer if this is the first charge spent
+    local dur = tonumber(s.chargeDuration) or 0
+    if dur > 0 and wasFull then
+        ch.rechargeStart = GetTime()
+    elseif dur > 0 and ch.rechargeStart <= 0 then
+        ch.rechargeStart = GetTime()
+    end
+    return true
+end
+
+-- Show charge count on a button (e.g. "2/3").
+-- Dirty-flagged via _msaChargeStyleKey.
+function MSWA_ShowChargeCount(btn, remaining, maxCharges, s, db)
+    local label = GetOrCreateChargeLabel(btn)
+    local text = tostring(remaining) .. "/" .. tostring(maxCharges)
+
+    local fontSize = tonumber(s and s.chargeFontSize) or (db and tonumber(db.stackFontSize)) or 12
+    local c = s and s.chargeColor
+    local cr, cg, cb = 1, 1, 1
+    if c then cr = c.r or 1; cg = c.g or 1; cb = c.b or 1 end
+    local fk = (s and s.chargeFontKey) or (db and db.fontKey) or "DEFAULT"
+    local pt = (s and s.chargePoint) or "BOTTOMRIGHT"
+    local ox = tonumber(s and s.chargeOffsetX) or 0
+    local oy = tonumber(s and s.chargeOffsetY) or 0
+
+    local styleKey = text .. ":" .. fk .. ":" .. fontSize .. ":" .. cr .. ":" .. cg .. ":" .. cb .. ":" .. pt .. ":" .. ox .. ":" .. oy
+
+    if btn._msaChargeStyleKey ~= styleKey then
+        btn._msaChargeStyleKey = styleKey
+        local fontPath = MSWA_GetFontPathFromKey(fk)
+        label:SetFont(fontPath, fontSize, "OUTLINE")
+        label:SetTextColor(cr, cg, cb, 1)
+        label:SetText(text)
+
+        label:ClearAllPoints()
+        local posOffsets = MSWA_TEXT_POINT_OFFSETS or {}
+        local off = posOffsets[pt] or { x = 1, y = 1 }
+        label:SetPoint(pt, btn, pt, (off.x or 0) + ox, (off.y or 0) + oy)
+    end
+
+    label:Show()
+end
+
+function MSWA_HideChargeLabel(btn)
+    if btn._msaChargeLabel then
+        btn._msaChargeLabel:Hide()
+    end
+    btn._msaChargeStyleKey = nil
+end
