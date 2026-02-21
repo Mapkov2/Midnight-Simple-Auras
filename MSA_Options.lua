@@ -904,7 +904,7 @@ local function MSWA_CreateOptionsFrame()
     f.title:SetText("Midnight Simple Auras")
 
     f.versionText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    f.versionText:SetText("Version 1.40")
+    f.versionText:SetText("Version 1.50")
     -- Anchor against the close button when available so it always stays top-right.
     local closeBtn = f.CloseButton or _G[f:GetName() .. "CloseButton"]
     if closeBtn then

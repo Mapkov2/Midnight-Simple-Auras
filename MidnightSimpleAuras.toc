@@ -2,7 +2,7 @@
 ## Title: MidnightSimpleAuras
 ## Notes: Simple personal auras tracker for Midnight.
 ## Author: Mapko
-## Version: 1.4
+## Version: 1.5
 ## SavedVariables: MidnightSimpleAurasDB
 ## OptionalDeps: LibSharedMedia-3.0, Masque, LibCustomGlow-1.0
 
